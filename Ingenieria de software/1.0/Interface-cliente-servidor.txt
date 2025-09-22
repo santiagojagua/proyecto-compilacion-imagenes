@@ -1,0 +1,12 @@
+INTERFACE ParallelImageProcessor
+
+  // Procesamiento por lotes
+  MÉTODO procesarLoteParalelo(operaciones: Lista<Operacion>) -> Lista<Resultado>
+
+
+  // Monitoreo y control
+  MÉTODO obtenerProgreso() -> real
+  MÉTODO cancelarProcesamiento()
+  MÉTODO obtenerEstadisticas() -> Mapa
+
+END INTERFACE
