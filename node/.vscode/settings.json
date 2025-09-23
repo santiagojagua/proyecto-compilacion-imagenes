@@ -1,0 +1,23 @@
+{
+    "alive.lisp": "sbcl",
+    "alive.server.autoStart": true,
+    "alive.server.path": "sbcl",
+    "alive.server.args": [],
+    "alive.commonLisp.sources": [
+        {
+            "name": "Quicklisp",
+            "path": "~/quicklisp"
+        }
+    ],
+    "alive.enableAutoComplete": true,
+    "alive.enableSyntaxHighlight": true,
+    "alive.showExpressionResult": true,
+    "files.associations": {
+        "*.lisp": "lisp",
+        "*.asd": "lisp",
+        "*.lsp": "lisp"
+    },
+    "editor.formatOnSave": true,
+    "editor.wordWrap": "on",
+    "lisp.format.enable": true
+}
