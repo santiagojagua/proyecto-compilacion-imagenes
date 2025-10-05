@@ -1,95 +1,69 @@
 ;;; main.lisp - Servidor API Hunchentoot básico
-(ql:quickload '(:hunchentoot :cl-json :alexandria))
 
+;; Cargar dependencias primero
+(ql:quickload '(:hunchentoot :cl-json :alexandria :bordeaux-threads))
+
+;; Definir el paquete
 (defpackage :mi-api
   (:use :cl :hunchentoot)
-  (:export :start-server :stop-server :main))
+  (:export :start-server :stop-server :main
+           :parallel-image-processor
+           :procesar-lote-paralelo
+           :obtener-progreso
+           :cancelar-procesamiento
+           :obtener-estadisticas))
+
 (in-package :mi-api)
 
 ;;; ==================== CONFIGURACIÓN ====================
-(defvar *acceptor* nil
-  "Instancia del servidor Hunchentoot")
+(defvar *acceptor* nil)
+(defparameter *default-port* 8080)
 
-(defparameter *default-port* 8080
-  "Puerto por defecto del servidor")
+;; 1) Cargar interfaces/implementación del procesador
+(load "src/parallelimageprocessor/interface.lisp")
+(load "src/parallelimageprocessor/implementation.lisp")
 
-;;; ==================== CARGA DE HANDLERS ====================
+;; 2) Instancia global del procesador
+(defvar *image-processor* (make-instance 'parallel-image-processor))
 
-;; Cargar los handlers desde el archivo separado
+;; 3) Cargar handlers
 (load "src/handlers/basic.lisp")
+(load "src/handlers/json-rpc.lisp")
 
 ;;; ==================== FUNCIONES PRINCIPALES ====================
 
-(defun start-server (&key (port *default-port*))
-  "Inicia el servidor Hunchentoot en el puerto especificado"
-  ;; Detener servidor anterior si existe
-  (when (and *acceptor* (hunchentoot:started-p *acceptor*))
-    (stop-server))
-  
-  ;; Crear e iniciar nuevo servidor
-  (setf *acceptor* 
-        (make-instance 'easy-acceptor 
-                       :port port
-                       :address "0.0.0.0"))  ; Escuchar en todas las interfaces
-  
-  (start *acceptor*)
-  
-  ;; Mostrar información
-  (format t "~%")
-  (format t "╔══════════════════════════════════════════════════╗~%")
-  (format t "║                🚀 SERVIDOR INICIADO              ║~%")
-  (format t "╠══════════════════════════════════════════════════╣~%")
-  (format t "║ Servidor: Hunchentoot                            ║~%")
-  (format t "║ Lenguaje: Common Lisp                            ║~%")
-  (format t "║ Puerto: ~D                                        ║~%" port)
-  (format t "║ URL: http://localhost:~D                         ║~%" port)
-  (format t "╚══════════════════════════════════════════════════╝~%")
-  (format t "~%📋 Endpoints disponibles:~%")
-  (format t "   🌐 GET /                      - 'hola lisp'~%")
-  (format t "   📊 GET /api/saludo            - Saludo JSON~%")
-  (format t "   👋 GET /api/saludo/:nombre    - Saludo personalizado~%")
-  (format t "   ❤️  GET /health               - Health check~%")
-  (format t "~%Presiona Ctrl+C para detener el servidor~%~%")
-  
-  *acceptor*)
-
 (defun stop-server ()
-  "Detiene el servidor Hunchentoot"
   (when *acceptor*
     (stop *acceptor*)
     (setf *acceptor* nil)
-    (format t "~%🛑 Servidor detenido correctamente~%")))
+    (format t "🛑 Servidor detenido~%")))
 
-;;; ==================== MANEJO DE SEÑALES SIMPLIFICADO ====================
-
-(defun setup-signal-handler ()
-  "Configura manejo básico de señales"
-  (format t "🔧 Configurando manejo de interrupciones...~%"))
-
-;;; ==================== FUNCIÓN PRINCIPAL ====================
+(defun start-server (&key (port *default-port*))
+  (when (and *acceptor* (started-p *acceptor*))
+    (stop-server))
+  (setf *acceptor* (make-instance 'easy-acceptor :port port :address "0.0.0.0"))
+  (start *acceptor*)
+  (format t "~%")
+  (format t "🚀 Servidor iniciado en puerto ~D~%" port)
+  (format t "📋 Endpoints:~%")
+  (format t "   GET  /              - hola lisp~%")
+  (format t "   GET  /health        - health check~%")
+  (format t "   POST /api/rpc       - JSON-RPC~%")
+  (format t "~%")
+  *acceptor*)
 
 (defun main (&optional (port *default-port*))
-  "Función principal para ejecutar el servidor"
-  (format t "~%~%=== INICIANDO API LISP ===~%~%")
-  
-  (setup-signal-handler)
+  (format t "~%=== INICIANDO API LISP ===~%~%")
   (start-server :port port)
   
-  ;; Mantener el servidor corriendo
   (handler-case
-      (loop 
-        (sleep 10)
-        (format t "Servidor activo en puerto ~D (~A)~%" 
-                port (get-universal-time)))
-    (#+sbcl sb-sys:interactive-interrupt 
-     #-sbcl simple-error ()
-      (format t "~%⏹️  Interrupción recibida, deteniendo servidor...~%")
+      (loop (sleep 10))
+    (sb-sys:interactive-interrupt ()
+      (format t "~%⏹️  Deteniendo servidor...~%")
       (stop-server)
-      #+sbcl (sb-ext:exit))))
+      (sb-ext:exit))))
 
-;;; ==================== EJECUCIÓN AUTOMÁTICA ====================
-
-#-swank
-(unless (member "--no-auto-start" (uiop:command-line-arguments) :test #'string=)
-  (format t "⏳ Iniciando servidor automáticamente...~%")
-  (main))
+;; Comentamos la ejecución automática para control manual
+;; #-swank
+;; (unless (member "--no-auto-start" (uiop:command-line-arguments) :test #'string=)
+;;   (main))

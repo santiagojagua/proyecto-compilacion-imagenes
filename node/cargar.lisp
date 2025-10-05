@@ -1,4 +1,4 @@
-;;; cargar.lisp - Script para cargar el proyecto rápidamente
+;;; cargar.lisp - Script para cargar el proyecto
 
 ;; Cargar Quicklisp
 #-quicklisp
@@ -8,19 +8,17 @@
 
 ;; Cargar dependencias
 (format t "📦 Cargando dependencias...~%")
-(ql:quickload '(:hunchentoot :cl-json :alexandria))
+(ql:quickload '(:hunchentoot :cl-json :alexandria :bordeaux-threads))
 
-;; Cargar el archivo principal primero (esto define el paquete MI-API)
+;; Cargar el archivo principal
 (format t "🚀 Cargando mi-api...~%")
 (load "src/main.lisp")
 
-;; Ahora podemos usar el paquete MI-API
+;; Cambiar al paquete MI-API
 (in-package :mi-api)
 
-(format t "~%~%")
-(format t "✨ ============================================== ✨~%")
-(format t "✨            API LISP CARGADA CORRECTAMENTE      ✨~%")
-(format t "✨ ============================================== ✨~%~%")
+(format t "~%")
+(format t "✨ API LISP CARGADA CORRECTAMENTE ✨~%~%")
 
 (format t "Comandos disponibles:~%")
 (format t "  (mi-api:start-server)     - Iniciar servidor en puerto 8080~%")
@@ -29,10 +27,15 @@
 (format t "  (mi-api:main)             - Ejecutar función principal~%~%")
 
 (format t "Endpoints disponibles:~%")
-(format t "  http://localhost:8080/~%")
-(format t "  http://localhost:8080/api/saludo~%")
-(format t "  http://localhost:8080/api/saludo/tu-nombre~%")
-(format t "  http://localhost:8080/health~%~%")
+(format t "  GET  http://localhost:8080/              - 'hola lisp'~%")
+(format t "  GET  http://localhost:8080/health        - Health check~%")
+(format t "  POST http://localhost:8080/api/rpc       - JSON-RPC Endpoint~%~%")
+
+(format t "Métodos JSON-RPC implementados:~%")
+(format t "  procesarLoteParalelo    - Procesa lote de operaciones~%")
+(format t "  obtenerProgreso         - Obtiene progreso actual~%")
+(format t "  cancelarProcesamiento   - Cancela procesamiento~%")
+(format t "  obtenerEstadisticas     - Obtiene estadísticas~%~%")
 
 ;; Preguntar si iniciar automáticamente
 (format t "¿Iniciar servidor ahora? (s/n): ")
@@ -42,4 +45,4 @@
             (string-equal response "si")
             (string-equal response "y")
             (string-equal response "yes"))
-    (main)))  ; Usamos 'main' directamente ya que estamos en el paquete mi-api
+    (main)))

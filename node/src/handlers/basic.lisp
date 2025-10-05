@@ -1,6 +1,10 @@
 ;;; src/handlers/basic.lisp - Handlers básicos para la API
 (in-package :mi-api)
 
+;; Declaración previa para evitar style-warning si se compila antes que main.lisp
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (declaim (special *acceptor*)))
+
 ;;; GET / - Devuelve "hola lisp"
 (define-easy-handler (hola-lisp :uri "/") ()
   (setf (content-type*) "text/plain; charset=utf-8")
@@ -9,7 +13,7 @@
 ;;; GET /api/saludo - Saludo en JSON
 (define-easy-handler (api-saludo :uri "/api/saludo") ()
   (setf (content-type*) "application/json; charset=utf-8")
-  (cl-json:encode-json-to-string 
+  (cl-json:encode-json-to-string
    `((:mensaje . "hola lisp")
      (:timestamp . ,(get-universal-time))
      (:servidor . "Common Lisp")
@@ -18,7 +22,7 @@
 ;;; GET /api/saludo/:nombre - Saludo personalizado
 (define-easy-handler (saludo-personalizado :uri "/api/saludo/:nombre") (nombre)
   (setf (content-type*) "application/json; charset=utf-8")
-  (cl-json:encode-json-to-string 
+  (cl-json:encode-json-to-string
    `((:mensaje . ,(format nil "hola ~a desde lisp" (or nombre "desconocido")))
      (:saludo-personalizado . t)
      (:timestamp . ,(get-universal-time))
@@ -27,7 +31,7 @@
 ;;; GET /health - Health check del servidor
 (define-easy-handler (health-check :uri "/health") ()
   (setf (content-type*) "application/json; charset=utf-8")
-  (cl-json:encode-json-to-string 
+  (cl-json:encode-json-to-string
    `((:status . "ok")
      (:servidor . "Hunchentoot")
      (:lenguaje . "Common Lisp")
