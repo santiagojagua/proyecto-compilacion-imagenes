@@ -8,7 +8,8 @@
 
 ;; Cargar dependencias
 (format t "📦 Cargando dependencias...~%")
-(ql:quickload '(:hunchentoot :cl-json :alexandria :bordeaux-threads))
+(ql:quickload '(:hunchentoot :cl-json :alexandria :bordeaux-threads
+               :opticl :cl-base64 :flexi-streams))
 
 ;; Cargar el archivo principal
 (format t "🚀 Cargando mi-api...~%")

@@ -1,7 +1,8 @@
 ;;; main.lisp - Servidor API Hunchentoot básico
 
 ;; Cargar dependencias primero
-(ql:quickload '(:hunchentoot :cl-json :alexandria :bordeaux-threads))
+(ql:quickload '(:hunchentoot :cl-json :alexandria :bordeaux-threads
+               :opticl :cl-base64 :flexi-streams))
 
 ;; Definir el paquete
 (defpackage :mi-api
@@ -21,6 +22,7 @@
 
 ;; 1) Cargar interfaces/implementación del procesador
 (load "src/parallelimageprocessor/interface.lisp")
+(load "src/parallelimageprocessor/opticl-pipeline.lisp")
 (load "src/parallelimageprocessor/implementation.lisp")
 
 ;; 2) Instancia global del procesador

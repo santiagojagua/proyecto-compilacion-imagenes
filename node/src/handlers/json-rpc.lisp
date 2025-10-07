@@ -3,7 +3,7 @@
 
 ;; Evitar style-warnings si se compila antes que main.lisp
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  (declaim (special *image-processor*)))
+  (declaim (special image-processor)))
 
 (defun parse-json-request ()
   "Parsea el cuerpo de la petición JSON"
@@ -88,7 +88,7 @@
              (if ops-list
                  (create-json-response
                   (procesar-lote-paralelo
-                   *image-processor*
+                   image-processor
                    (convert-to-operaciones ops-list))
                   :id id)
                  (create-error-response -32602
@@ -96,13 +96,13 @@
                    :id id))))
           ((string= (or method "") "obtenerProgreso")
            (create-json-response
-            (obtener-progreso *image-processor*) :id id))
+            (obtener-progreso image-processor) :id id))
           ((string= (or method "") "cancelarProcesamiento")
            (create-json-response
-            (cancelar-procesamiento *image-processor*) :id id))
+            (cancelar-procesamiento image-processor) :id id))
           ((string= (or method "") "obtenerEstadisticas")
            (create-json-response
-            (obtener-estadisticas *image-processor*) :id id))
+            (obtener-estadisticas image-processor) :id id))
           (t
            (create-error-response -32601 "Método no encontrado" :id id))))
     (error (e)
