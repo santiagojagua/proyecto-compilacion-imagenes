@@ -1,4 +1,4 @@
-;;;; imgx.lisp
+;;;; src/parallelimageprocessor/imgx.lisp
 ;;;; Módulo de procesamiento de imágenes con OptiCL y entrada/salida Base64 (cl-base64).
 ;;;; Exporta: IMGX:PROCESAR-IMAGEN-B64
 
@@ -99,6 +99,27 @@
          (fn  (or (find-symbol "USB8-ARRAY-TO-BASE64-STRING" pkg)
                   (error "CL-BASE64 no expone USB8-ARRAY-TO-BASE64-STRING."))))
     (funcall fn bytes)))
+
+(defun %generate-filename (fmt &optional prefix)
+  "Genera un nombre de archivo único con timestamp"
+  (format nil "~@[~a-~]~d-~36r.~a"
+          prefix
+          (get-universal-time)
+          (random (expt 36 6))
+          (%format->ext fmt)))
+
+(defun %ensure-directory (path)
+  "Asegura que el directorio existe, creándolo si es necesario"
+  (let ((dir (if (pathnamep path) path (pathname path))))
+    (ensure-directories-exist dir)
+    dir))
+
+(defun %get-project-root ()
+  "Obtiene el directorio raíz del proyecto (donde está mi-api.asd)"
+  (let ((asd-path (asdf:system-source-directory :mi-api)))
+    (if asd-path
+        asd-path
+        (error "No se puede determinar el directorio del proyecto"))))
 
 ;;;; Lectura/escritura con OptiCL (por archivo)
 
@@ -285,7 +306,7 @@
 ;;;; API pública: entrada y salida en Base64
 (defun procesar-imagen-b64 (entrada-b64
                             &key
-                              input-format        ;; :jpg | :png | :tif (opcional, se intenta deducir)
+                              input-format
                               grayscale
                               resize
                               crop
@@ -295,25 +316,17 @@
                               sharpen
                               brightness
                               contrast
-                              watermark-image      ;; ("logo.png" :x :y :alpha)
-                              watermark-image-b64  ;; (b64 :format :png :x :y :alpha) o data URI
-                              output-format        ;; :jpg | :png | :tif (si no, igual al input)
+                              watermark-image
+                              watermark-image-b64
+                              output-format
                               (quality 90)
-                              (as-data-uri nil))   ;; si T, devuelve data URI
-  "Procesa una imagen codificada en Base64 (o Data URI) y devuelve el resultado en Base64.
-Parámetros principales:
-- :resize '(W H)
-- :crop   '(X Y W H)
-- :rotate 0|90|180|270 o grados arbitrarios si OptiCL lo soporta
-- :flip   :horizontal | :vertical | (:horizontal :vertical)
-- :blur   1.2 o '(:sigma 1.2 :radius 3)
-- :sharpen t o '(:radius 2.0 :amount 1.0 :threshold 0)
-- :brightness (por tu versión de OptiCL)
-- :contrast   (1.0 = sin cambio)
-- :watermark-image '(\"logo.png\" :x 20 :y 20 :alpha 0.3)
-- :watermark-image-b64 '(\"data:image/png;base64,...\" :x 20 :y 20 :alpha 0.3)
-- :output-format :jpg | :png | :tif
-- :as-data-uri t => devuelve 'data:image/xxx;base64,...'"
+                              (as-data-uri nil)
+                              (save-to-disk nil)      ; NUEVO
+                              (output-dir "images/")  ; NUEVO
+                              (filename-prefix nil))  ; NUEVO
+  "Procesa una imagen codificada en Base64 (o Data URI) y devuelve el resultado.
+Si :save-to-disk es T, guarda en output-dir y devuelve plist con :output-b64 y :file-path
+Si :save-to-disk es NIL, devuelve solo base64 string"
   (multiple-value-bind (pure-b64 mime) (%strip-data-uri entrada-b64)
     (let* ((bytes (%b64->bytes pure-b64))
            (fmt-in (or input-format (%mime->format mime) (%detect-format-bytes bytes)
@@ -324,7 +337,6 @@ Parámetros principales:
       (unwind-protect
            (progn
              (%write-bytes-to-file bytes tmp-in)
-             ;; Procesamos hasta escribir archivo de salida
              (%procesar-imagen-archivo
               tmp-in tmp-out
               :grayscale grayscale
@@ -336,20 +348,47 @@ Parámetros principales:
               :sharpen sharpen
               :brightness brightness
               :contrast contrast
-              :watermark-image watermark-image ; si viene b64, la aplicamos luego
+              :watermark-image watermark-image
               :format fmt-out
               :quality quality)
-             ;; Si hay marca de agua en base64, la aplicamos ahora
              (when watermark-image-b64
                (let ((img (%leer-imagen tmp-out)))
-                 (%watermark-image-b64 img watermark-image-b64)
+                 (setf img (%watermark-image-b64 img watermark-image-b64))
                  (%escribir-imagen img tmp-out :format fmt-out :quality quality)))
-             ;; Leemos bytes de salida y devolvemos base64 (o data URI)
+             
              (let* ((out-bytes (%read-file-to-bytes tmp-out))
                     (b64 (%bytes->b64 out-bytes)))
-               (if as-data-uri
-                   (format nil "data:image/~a;base64,~a"
-                           (%format->ext fmt-out) b64)
-                   b64)))
+               (if save-to-disk
+                   ;; Guardar en disco y devolver plist
+                   (let* ((project-root (%get-project-root))
+                          (images-dir (merge-pathnames output-dir project-root))
+                          (filename (%generate-filename fmt-out filename-prefix))
+                          (final-path (merge-pathnames filename (%ensure-directory images-dir))))
+                     (%write-bytes-to-file out-bytes final-path)
+                     (list :output-b64 (if as-data-uri
+                                           (format nil "data:image/~a;base64,~a"
+                                                   (%format->ext fmt-out) b64)
+                                           b64)
+                           :file-path final-path))
+                   ;; Solo devolver base64
+                   (if as-data-uri
+                       (format nil "data:image/~a;base64,~a"
+                               (%format->ext fmt-out) b64)
+                       b64))))
         (ignore-errors (when (probe-file tmp-in)  (delete-file tmp-in)))
         (ignore-errors (when (probe-file tmp-out) (delete-file tmp-out)))))))
+
+(defun guardar-imagen-b64 (b64 &key
+                                  (output-format :png)
+                                  (output-dir "images/")
+                                  (filename-prefix "img"))
+  "Guarda una imagen base64 directamente a disco"
+  (multiple-value-bind (pure-b64 mime) (%strip-data-uri b64)
+    (let* ((bytes (%b64->bytes pure-b64))
+           (fmt (or output-format (%mime->format mime) (%detect-format-bytes bytes)))
+           (project-root (%get-project-root))
+           (images-dir (merge-pathnames output-dir project-root))
+           (filename (%generate-filename fmt filename-prefix))
+           (final-path (merge-pathnames filename (%ensure-directory images-dir))))
+      (%write-bytes-to-file bytes final-path)
+      final-path)))

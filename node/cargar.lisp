@@ -1,48 +1,50 @@
 ;;; cargar.lisp - Script para cargar el proyecto
 
-;; Cargar Quicklisp
+;; Cargar Quicklisp si no está ya cargado
 #-quicklisp
 (let ((quicklisp-init (merge-pathnames "quicklisp/setup.lisp" (user-homedir-pathname))))
   (when (probe-file quicklisp-init)
     (load quicklisp-init)))
 
-;; Cargar dependencias
-(format t "📦 Cargando dependencias...~%")
-(ql:quickload '(:hunchentoot :cl-json :alexandria :bordeaux-threads :cl-base64 :opticl))
+;; Determinar el directorio del script
+(defparameter *project-dir*
+  (make-pathname 
+   :name nil 
+   :type nil 
+   :defaults (or *load-truename* 
+                 *compile-file-truename* 
+                 (truename "."))))
 
-;; Cargar el archivo principal
-(format t "🚀 Cargando mi-api...~%")
-(load "src/main.lisp")
+(format t "📂 Directorio del proyecto: ~A~%" *project-dir*)
 
-;; Cambiar al paquete MI-API
+;; Registrar el directorio del proyecto en ASDF
+(pushnew *project-dir* asdf:*central-registry* :test #'equal)
+
+;; Verificar que el archivo .asd existe
+(let ((asd-file (merge-pathnames "mi-api.asd" *project-dir*)))
+  (if (probe-file asd-file)
+      (format t "✅ Encontrado: ~A~%" asd-file)
+      (progn
+        (format t "❌ ERROR: No se encuentra ~A~%" asd-file)
+        (format t "   Archivos en el directorio:~%")
+        (dolist (file (directory (merge-pathnames "*.*" *project-dir*)))
+          (format t "   - ~A~%" (file-namestring file)))
+        (sb-ext:exit :code 1))))
+
+;; Cargar el sistema usando ASDF
+(format t "~%📦 Cargando el sistema :mi-api vía ASDF...~%")
+(handler-case
+    (asdf:load-system :mi-api)
+  (error (e)
+    (format t "❌ ERROR al cargar el sistema: ~A~%" e)
+    (sb-ext:exit :code 1)))
+
+;; Cambiar al paquete para conveniencia del usuario
 (in-package :mi-api)
 
-(format t "~%")
-(format t "✨ API LISP CARGADA CORRECTAMENTE ✨~%~%")
-
+(format t "~%✨ API LISP CARGADA CORRECTAMENTE ✨~%~%")
 (format t "Comandos disponibles:~%")
-(format t "  (mi-api:start-server)     - Iniciar servidor en puerto 8080~%")
+(format t "  (mi-api:start-server)           - Iniciar servidor en puerto 8080~%")
 (format t "  (mi-api:start-server :port 9090) - Iniciar en puerto personalizado~%")
-(format t "  (mi-api:stop-server)      - Detener servidor~%")
-(format t "  (mi-api:main)             - Ejecutar función principal~%~%")
-
-(format t "Endpoints disponibles:~%")
-(format t "  GET  http://localhost:8080/              - 'hola lisp'~%")
-(format t "  GET  http://localhost:8080/health        - Health check~%")
-(format t "  POST http://localhost:8080/api/rpc       - JSON-RPC Endpoint~%~%")
-
-(format t "Métodos JSON-RPC implementados:~%")
-(format t " imgxProcesarLote - Procesa lote de imágenes (Base64) con IMGX~%")
-(format t "  obtenerProgreso         - Obtiene progreso actual~%")
-(format t "  cancelarProcesamiento   - Cancela procesamiento~%")
-(format t "  obtenerEstadisticas     - Obtiene estadísticas~%~%")
-
-;; Preguntar si iniciar automáticamente
-(format t "¿Iniciar servidor ahora? (s/n): ")
-(force-output)
-(let ((response (read-line)))
-  (when (or (string-equal response "s") 
-            (string-equal response "si")
-            (string-equal response "y")
-            (string-equal response "yes"))
-    (main)))
+(format t "  (mi-api:stop-server)            - Detener servidor~%")
+(format t "  (mi-api:main)                   - Ejecutar función principal~%~%")

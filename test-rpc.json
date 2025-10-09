@@ -1,0 +1,18 @@
+{
+  "jsonrpc": "2.0",
+  "method": "imgxProcesarLote",
+  "params": {
+    "tareas": [
+      {
+        "id": 1,
+        "input-b64": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+        "ops": {
+          "grayscale": true,
+          "output-format": "png",
+          "as-data-uri": true
+        }
+      }
+    ]
+  },
+  "id": 1
+}

@@ -4,16 +4,24 @@
   :version "1.0.0"
   :author "jagua"
   :license "MIT"
-  :depends-on (#:hunchentoot #:cl-json #:alexandria #:bordeaux-threads)
+  :depends-on (#:hunchentoot #:cl-json #:alexandria #:bordeaux-threads #:cl-base64 #:opticl)
   :components
-  ((:module "src"
+  ((:file "src/package")
+   (:module "src"
+    :serial t
     :components
-    ((:file "main")
-     (:module "parallelimageprocessor"
+    ((:module "parallelimageprocessor"
+      :serial t
+      :pathname "parallelimageprocessor/"
       :components
-      ((:file "interface")
-       (:file "implementation")))
+      ((:file "imgx")
+       (:file "imgx-batch")
+       (:file "interface")
+       (:file "implementation-imgx")))
      (:module "handlers"
+      :serial t
+      :pathname "handlers/"
       :components
       ((:file "basic")
-       (:file "json-rpc")))))))
+       (:file "json-rpc")))
+     (:file "main")))))
