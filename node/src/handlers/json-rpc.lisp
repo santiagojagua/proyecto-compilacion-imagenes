@@ -3,7 +3,7 @@
 
 ;; Evitar style-warnings si se compila antes que main.lisp
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  (declaim (special image-processor)))
+  (declaim (special job-manager)))
 
 (defun parse-json-request ()
   "Parsea el cuerpo de la petición JSON"
@@ -48,6 +48,23 @@
   (let ((cell (jassoc key obj)))
     (when cell (cdr cell))))
 
+(defun to-keyword (k)
+  (cond
+    ((keywordp k) k)
+    ((symbolp k) (intern (string-upcase (symbol-name k)) :keyword))
+    ((stringp k) (intern (string-upcase k) :keyword))
+    (t k)))
+
+(defun alist->plist (alist)
+  (loop for (k . v) in alist
+        append (list (to-keyword k) (deep-json->lisp v))))
+
+(defun deep-json->lisp (x)
+  (cond
+    ((vectorp x) (map 'list #'deep-json->lisp x))
+    ((alist-p x) (alist->plist x))
+    (t x)))
+
 (defun convert-to-operaciones (operaciones-json)
   "Convierte operaciones JSON a objetos operacion (soporta vector o lista)."
   (let ((ops (cond
@@ -69,40 +86,49 @@
              (id (or (jget request :id) (jget request "id"))))
         (format t "📥 JSON-RPC Request: ~A~%" method)
         (cond
-          ((string= (or method "") "procesarLoteParalelo")
-           ;; params puede ser:
-           ;; - vector de operaciones (params como array)
-           ;; - alist con clave :operaciones / "operaciones"
-           ;; - lista de operaciones (si *json-array-type* fuese 'list)
-           (let* ((ops-raw (cond
-                             ((vectorp params) params)
-                             ((alist-p params)
-                              (or (jget params :operaciones)
-                                  (jget params "operaciones")))
-                             ((listp params) params)
-                             (t nil)))
-                  (ops-list (cond
-                              ((vectorp ops-raw) (coerce ops-raw 'list))
-                              ((listp ops-raw) ops-raw)
-                              (t nil))))
-             (if ops-list
-                 (create-json-response
-                  (procesar-lote-paralelo
-                   image-processor
-                   (convert-to-operaciones ops-list))
-                  :id id)
-                 (create-error-response -32602
-                   "Parámetros inválidos: se esperaba 'operaciones' como lista/array"
-                   :id id))))
+          ((string= (or method "") "imgxProcesarLote")
+            (let* ((ops-raw (cond
+                              ((vectorp params) params)
+                              ((alist-p params)
+                                (or (jget params :tareas)
+                                    (jget params "tareas")
+                                    (jget params :tasks)
+                                    (jget params "tasks")
+                                    params))
+                              ((listp params) params)
+                              (t nil)))
+                    (tareas (mapcar #'deep-json->lisp
+                                    (cond
+                                      ((vectorp ops-raw) (coerce ops-raw 'list))
+                                      ((listp ops-raw) ops-raw)
+                                      ((alist-p ops-raw) (list ops-raw))
+                                      (t '()))))
+                    (default-opts (and (alist-p params)
+                                      (deep-json->lisp
+                                        (or (jget params :default-opts)
+                                            (jget params "default-opts")
+                                            (jget params :defaultOpts)
+                                            (jget params "defaultOpts")))))
+                    (max-threads (and (alist-p params)
+                                      (or (jget params :max-threads)
+                                          (jget params "max-threads")
+                                          (jget params :maxThreads)
+                                          (jget params "maxThreads")))))
+              (if (null tareas)
+                  (create-error-response -32602 "Parámetros inválidos: se esperaban 'tareas' como lista/array" :id id)
+                  (create-json-response
+                    (mi-api:procesar-lote-imgx job-manager tareas
+                                              :default-opts (or default-opts '())
+                                              :max-threads max-threads)
+                    :id id))))
           ((string= (or method "") "obtenerProgreso")
-           (create-json-response
-            (obtener-progreso image-processor) :id id))
+            (create-json-response (obtener-progreso job-manager) :id id))
+
           ((string= (or method "") "cancelarProcesamiento")
-           (create-json-response
-            (cancelar-procesamiento image-processor) :id id))
+            (create-json-response (cancelar-procesamiento job-manager) :id id))
+
           ((string= (or method "") "obtenerEstadisticas")
-           (create-json-response
-            (obtener-estadisticas image-processor) :id id))
+            (create-json-response (obtener-estadisticas job-manager) :id id))
           (t
            (create-error-response -32601 "Método no encontrado" :id id))))
     (error (e)

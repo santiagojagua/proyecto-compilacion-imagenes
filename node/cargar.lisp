@@ -8,8 +8,7 @@
 
 ;; Cargar dependencias
 (format t "📦 Cargando dependencias...~%")
-(ql:quickload '(:hunchentoot :cl-json :alexandria :bordeaux-threads
-               :opticl :cl-base64 :flexi-streams))
+(ql:quickload '(:hunchentoot :cl-json :alexandria :bordeaux-threads :cl-base64 :opticl))
 
 ;; Cargar el archivo principal
 (format t "🚀 Cargando mi-api...~%")
@@ -33,7 +32,7 @@
 (format t "  POST http://localhost:8080/api/rpc       - JSON-RPC Endpoint~%~%")
 
 (format t "Métodos JSON-RPC implementados:~%")
-(format t "  procesarLoteParalelo    - Procesa lote de operaciones~%")
+(format t " imgxProcesarLote - Procesa lote de imágenes (Base64) con IMGX~%")
 (format t "  obtenerProgreso         - Obtiene progreso actual~%")
 (format t "  cancelarProcesamiento   - Cancela procesamiento~%")
 (format t "  obtenerEstadisticas     - Obtiene estadísticas~%~%")

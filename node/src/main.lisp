@@ -1,15 +1,14 @@
 ;;; main.lisp - Servidor API Hunchentoot básico
 
 ;; Cargar dependencias primero
-(ql:quickload '(:hunchentoot :cl-json :alexandria :bordeaux-threads
-               :opticl :cl-base64 :flexi-streams))
+(ql:quickload '(:hunchentoot :cl-json :alexandria :bordeaux-threads :cl-base64 :opticl))
 
 ;; Definir el paquete
 (defpackage :mi-api
   (:use :cl :hunchentoot)
   (:export :start-server :stop-server :main
-           :parallel-image-processor
-           :procesar-lote-paralelo
+           :imgx-job-manager
+           :procesar-lote-imgx
            :obtener-progreso
            :cancelar-procesamiento
            :obtener-estadisticas))
@@ -21,12 +20,13 @@
 (defparameter *default-port* 8080)
 
 ;; 1) Cargar interfaces/implementación del procesador
+(load "src/parallelimageprocessor/imgx.lisp")
+(load "src/parallelimageprocessor/imgx-batch.lisp")
 (load "src/parallelimageprocessor/interface.lisp")
-(load "src/parallelimageprocessor/opticl-pipeline.lisp")
-(load "src/parallelimageprocessor/implementation.lisp")
+(load "src/parallelimageprocessor/implementation-imgx.lisp")
 
 ;; 2) Instancia global del procesador
-(defvar *image-processor* (make-instance 'parallel-image-processor))
+(defvar job-manager (make-instance 'imgx-job-manager))
 
 ;; 3) Cargar handlers
 (load "src/handlers/basic.lisp")
