@@ -15,25 +15,25 @@
           (job-ended-at mgr) nil
           (job-results mgr) nil)
     (setf (job-thread mgr)
-          (bt:make-thread
-           (lambda ()
-             (let ((res (imgx-batch:procesar-peticion
-                         tareas
-                         :default-opts default-opts
-                         :max-threads max-threads
-                         :on-progress (lambda (&key index n &allow-other-keys)
-                                        (declare (ignore index n))
-                                        (bt:with-lock-held ((job-lock mgr))
-                                          (when (eq (job-status mgr) :running)
-                                            (incf (job-done mgr)))))
-                         :cancel-predicate (lambda ()
-                                             (bt:with-lock-held ((job-lock mgr))
-                                               (job-cancel-flag mgr))))))
-               (bt:with-lock-held ((job-lock mgr))
-                 (setf (job-results mgr) res
-                       (job-status mgr) (if (job-cancel-flag mgr) :cancelled :finished)
-                       (job-ended-at mgr) (get-universal-time))))))
-           :name "imgx-job"))
+      (bt:make-thread
+       (lambda ()
+         (let ((res (imgx-batch:procesar-peticion
+                     tareas
+                     :default-opts default-opts
+                     :max-threads max-threads
+                     :on-progress (lambda (&key index n &allow-other-keys)
+                                    (declare (ignore index n))
+                                    (bt:with-lock-held ((job-lock mgr))
+                                      (when (eq (job-status mgr) :running)
+                                        (incf (job-done mgr)))))
+                     :cancel-predicate (lambda ()
+                                         (bt:with-lock-held ((job-lock mgr))
+                                           (job-cancel-flag mgr))))))
+           (bt:with-lock-held ((job-lock mgr))
+             (setf (job-results mgr) res
+                   (job-status mgr) (if (job-cancel-flag mgr) :cancelled :finished)
+                   (job-ended-at mgr) (get-universal-time))))))
+       :name "imgx-job"))
   `((:status . "procesamiento-iniciado")
     (:operaciones . ,(length tareas))
     (:id-lote . ,(job-id mgr))))

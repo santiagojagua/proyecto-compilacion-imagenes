@@ -19,9 +19,9 @@
 (defparameter *bt* (find-package :bordeaux-threads))
 
 (defun %with-lock (lock thunk)
-  (funcall (find-symbol "ACQUIRE-LOCK" *bt*) lock nil)
+  (funcall (find-symbol "ACQUIRE-LOCK" *bt*) lock)
   (unwind-protect
-       (funcall thunk)
+      (funcall thunk)
     (funcall (find-symbol "RELEASE-LOCK" *bt*) lock)))
 
 (defun %make-lock (&optional (name "imgx-batch-lock"))

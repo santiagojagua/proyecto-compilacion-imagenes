@@ -1,6 +1,7 @@
 from app import db
 from app.models.entitys import User
 from app.models.viewModel import ImagenCambiosViewModel
+from .node_service import *
 
 def save_request(data):
     req = User(content=data)
@@ -17,13 +18,38 @@ def procesar_imagenes(data: dict):
     try:
         
         vm = ImagenCambiosViewModel(data)
-        print(f"🧩 Usuario: {vm.user_id}")
-        for img in vm.imagenes:
-            print(f"📸 Imagen: {img.nombre} ({img.tipo})")
-            for cambio in img.cambios:
-                print(f"   🔁 Cambio: {cambio.nombre} - {cambio.especificaciones}")
+        json_rpc = construir_json_rpc(vm)
+
+        resultado = enviar_json_imagenes(json_rpc)
+        print(f"Respuesta del nodo: {resultado}")
+
         return {"success": True, "message": "Datos procesados correctamente"}
     
     except Exception as e:
         db.session.rollback()
         return {"success": False, "message": str(e)}
+    
+def construir_json_rpc(vm: ImagenCambiosViewModel) -> dict:
+    tareas = []
+    for idx, img in enumerate(vm.imagenes, start=1):
+
+        ops = {c.nombre: c.especificaciones for c in img.cambios}
+        tarea = {
+            "id": idx,
+            "b64": img.contenido_base64,
+            "ops": ops
+        }
+        tareas.append(tarea)
+    
+    json_rpc = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "imgxProcesarLote",
+        "params": {
+            "tareas": tareas,
+            "default-opts": {"as-data-uri": True},
+            "max-threads": 4
+        }
+    }
+    
+    return json_rpc

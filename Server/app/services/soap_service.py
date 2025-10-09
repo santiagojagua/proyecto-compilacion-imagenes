@@ -36,12 +36,12 @@ class HelloWorldService(ServiceBase):
         return get_saludo_from_node()
     
     @rpc(ImagenCambiosType, _returns=Unicode)
-    def procesar_imagen_cambios(ctx, data):
+    def procesar_imagen_cambios(ctx, request):
         
         """Recibe el XML del front, lo convierte y lo pasa a otra función"""
-        user_id = data.user_id
+        user_id = request.user_id
 
-        data_dict = spyne_to_dict(data)
+        data_dict = spyne_to_dict(request)
         result = procesar_imagenes(data_dict)
 
         return f"Procesado correctamente: {result}"
@@ -61,7 +61,8 @@ soap_app = Application(
     [HelloWorldService],
     tns="server.soap.service",
     in_protocol=Soap11(validator="lxml"),
-    out_protocol=Soap11()
+    out_protocol=Soap11(),
+    name='HelloWorldService'
 )
 
 wsgi_app = WsgiApplication(soap_app)

@@ -45,6 +45,9 @@
     (stop-server))
   (setf *acceptor* (make-instance 'easy-acceptor :port port :address "0.0.0.0"))
   (start *acceptor*)
+  (ignore-errors
+  (setf hunchentoot:*show-lisp-errors-p* t
+        hunchentoot:*show-lisp-backtraces-p* t))
   (format t "~%")
   (format t "🚀 Servidor iniciado en puerto ~D~%" port)
   (format t "📋 Endpoints:~%")

@@ -1,9 +1,10 @@
 from flask import Blueprint, request, Response
-from app.services.soap_service import wsgi_app
+from app.services.soap_service import wsgi_app, soap_app
+from spyne.interface.wsdl import Wsdl11
 
 soap_bp = Blueprint("soap", __name__)
 
-@soap_bp.route("/soap", methods=["POST"])
+@soap_bp.route("/soap", methods=["GET", "POST"])
 def soap():
     def start_response(status, response_headers, exc_info=None):
         nonlocal response_status, response_headers_out
