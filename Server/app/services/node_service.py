@@ -1,47 +1,111 @@
-import requests
-import json
+import Pyro4
+import base64
+from typing import List, Dict, Any
 
-def get_saludo_from_node():
-    """Llama al nodo REST y devuelve el resultado como string"""
+# Configuración de conexión Pyro4
+PYRO_URI = "PYRO:procesador.imagenes@localhost:9090"
+
+def conectar_servidor_imagenes():
+    """Conecta al servidor Pyro4 de procesamiento de imágenes"""
     try:
-        resp = requests.get("http://localhost:8080/api/saludo")
-        resp.raise_for_status()
-        data = resp.json()
-
-        return f"Mensaje: {data['mensaje']}, Servidor: {data['servidor']}, Timestamp: {data['timestamp']}"
-
+        procesador = Pyro4.Proxy(PYRO_URI)
+        # Probar conexión
+        procesador.saludar()
+        return procesador
     except Exception as e:
-        return f"Error al comunicarse con el nodo: {str(e)}"
-    
-def enviar_json_imagenes(json_rpc: dict):
+        raise ConnectionError(f"No se pudo conectar al servidor Pyro4: {e}")
 
+def procesar_imagenes_pyro(lista_imagenes: List[Dict]) -> Dict[str, Any]:
     """
-    Envía el JSON RPC construido al nodo.
+    Envía las imágenes al servidor Pyro4 para procesamiento
     """
-    url = "http://localhost:8080/api/rpc"
-
     try:
-        # Convertir dict a JSON string
-        payload = json.dumps(json_rpc)
-
-        headers = {
-            "Content-Type": "application/json"
+        # Conectar al servidor
+        procesador = conectar_servidor_imagenes()
+        
+        # Preparar datos para Pyro4
+        imagenes_pyro = []
+        
+        for img_data in lista_imagenes:
+            # Convertir cambios a formato Pyro4
+            transformaciones = []
+            for cambio in img_data.get('cambios', []):
+                transformacion = {
+                    'tipo': cambio['nombre'],
+                    'parametros': _parsear_especificaciones(cambio['especificaciones'])
+                }
+                transformaciones.append(transformacion)
+            
+            imagen_pyro = {
+                'nombre': img_data['nombre'],
+                'imagen': img_data['contenido_base64'],
+                'transformaciones': transformaciones
+            }
+            imagenes_pyro.append(imagen_pyro)
+        
+        print(f"Enviando {len(imagenes_pyro)} imágenes a Pyro4...")
+        
+        # Enviar al servidor Pyro4
+        resultado = procesador.procesar_imagenes(imagenes_pyro)
+        
+        print(f"Resultado de Pyro4: {resultado}")
+        
+        return {
+            'success': True,
+            'resultado': resultado,
+            'mensaje': f'Procesadas {resultado.get("total_procesadas", 0)} imágenes correctamente'
+        }
+        
+    except Exception as e:
+        import traceback
+        print(f"Error en procesar_imagenes_pyro: {traceback.format_exc()}")
+        return {
+            'success': False,
+            'error': str(e),
+            'mensaje': 'Error en el procesamiento de imágenes'
         }
 
-        # POST con el JSON RPC
-        resp = requests.post(url, data=payload, headers=headers)
-        resp.raise_for_status()  # Lanza excepción si no es 2xx
+def _parsear_especificaciones(especificaciones: str) -> Dict:
+    """
+    Convierte las especificaciones de string a diccionario
+    Ejemplo: "ancho=800,alto=600" -> {'ancho': 800, 'alto': 600}
+    """
+    parametros = {}
+    if especificaciones and especificaciones.strip():
+        partes = especificaciones.split(',')
+        for parte in partes:
+            if '=' in parte:
+                key, value = parte.split('=', 1)
+                key = key.strip()
+                value = value.strip()
+                
+                # Convertir a número si es posible
+                try:
+                    if '.' in value:
+                        value = float(value)
+                    else:
+                        value = int(value)
+                except ValueError:
+                    # Mantener como string si no se puede convertir
+                    pass
+                
+                parametros[key] = value
+    
+    return parametros
 
-        # Obtener respuesta como dict
-        data = resp.json()
-
-        # Dependiendo de la respuesta del nodo
-        mensaje = data.get("mensaje") or data.get("result") or str(data)
-        servidor = data.get("servidor", "desconocido")
-        timestamp = data.get("timestamp", "desconocido")
-
-        return f"Mensaje: {mensaje}, Servidor: {servidor}, Timestamp: {timestamp}"
-
+def obtener_estado_servidor() -> Dict[str, Any]:
+    """Obtiene el estado del servidor Pyro4"""
+    try:
+        procesador = conectar_servidor_imagenes()
+        estado = procesador.obtener_estado_servidor()
+        return {
+            'success': True,
+            'estado': 'conectado',
+            'detalles': estado
+        }
     except Exception as e:
-        print(e)
-        return f"Error al comunicarse con el nodo: {str(e)}"
+        return {
+            'success': False,
+            'estado': 'desconectado',
+            'error': str(e)
+        }

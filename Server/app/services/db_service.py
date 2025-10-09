@@ -1,7 +1,7 @@
 from app import db
 from app.models.entitys import User
 from app.models.viewModel import ImagenCambiosViewModel
-from .node_service import *
+from .node_service import procesar_imagenes_pyro
 
 def save_request(data):
     req = User(content=data)
@@ -9,47 +9,43 @@ def save_request(data):
     db.session.commit()
     
 def procesar_imagenes(data: dict):
-    
     """
-    Recibe un diccionario (desde el SOAP/JSON/XML),
-    lo transforma al ViewModel y guarda todo en la BD.
+    Recibe un diccionario (desde el SOAP), lo transforma al ViewModel
+    y envía al servidor Pyro4 para procesamiento
     """
-    
     try:
-        
+        # Convertir a ViewModel
         vm = ImagenCambiosViewModel(data)
-        json_rpc = construir_json_rpc(vm)
-
-        resultado = enviar_json_imagenes(json_rpc)
-        print(f"Respuesta del nodo: {resultado}")
-
-        return {"success": True, "message": "Datos procesados correctamente"}
+        
+        # Preparar datos para Pyro4
+        lista_imagenes = []
+        for img in vm.imagenes:
+            imagen_data = {
+                'nombre': img.nombre,
+                'contenido_base64': img.contenido_base64,
+                'cambios': [
+                    {
+                        'nombre': cambio.nombre,
+                        'especificaciones': cambio.especificaciones
+                    }
+                    for cambio in img.cambios
+                ]
+            }
+            lista_imagenes.append(imagen_data)
+        
+        # Enviar al servidor Pyro4
+        resultado = procesar_imagenes_pyro(lista_imagenes)
+        
+        # Guardar en base de datos si es necesario
+        # save_request(data)  # Descomentar si quieres guardar las peticiones
+        
+        return resultado
     
     except Exception as e:
         db.session.rollback()
-        return {"success": False, "message": str(e)}
-    
-def construir_json_rpc(vm: ImagenCambiosViewModel) -> dict:
-    tareas = []
-    for idx, img in enumerate(vm.imagenes, start=1):
+        return {
+            'success': False, 
+            'message': f'Error en procesamiento: {str(e)}'
+        }
 
-        ops = {c.nombre: c.especificaciones for c in img.cambios}
-        tarea = {
-            "id": idx,
-            "b64": img.contenido_base64,
-            "ops": ops
-        }
-        tareas.append(tarea)
-    
-    json_rpc = {
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "imgxProcesarLote",
-        "params": {
-            "tareas": tareas,
-            "default-opts": {"as-data-uri": True},
-            "max-threads": 4
-        }
-    }
-    
-    return json_rpc
+# Eliminar la función construir_json_rpc ya que no se usa más

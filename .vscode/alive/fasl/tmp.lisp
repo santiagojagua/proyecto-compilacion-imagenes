@@ -1,191 +1,223 @@
-;;;; src/parallelimageprocessor/imgx-batch.lisp
-;;;; Procesamiento en paralelo de una petición con múltiples imágenes (Base64) usando hilos.
-;;;; Depende de: bordeaux-threads y del módulo IMGX (imgx.lisp).
-;;;; Exporta: IMGX-BATCH:PROCESAR-PETICION
-
-(in-package #:cl-user)
-
-(defpackage #:imgx-batch
-  (:use #:cl)
-  (:import-from #:imgx #:procesar-imagen-b64 #:guardar-imagen-b64)
-  (:export #:procesar-peticion))
-(in-package #:imgx-batch)
+;;;; src/handlers/json-rpc.lisp - JSON-RPC con IMGX Job Manager
+(in-package :mi-api)
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  (unless (find-package :bordeaux-threads)
-    (error "Falta :bordeaux-threads. Carga: (ql:quickload :bordeaux-threads)")))
+  (declaim (special job-manager)))
 
-;; Alias corto
-(defparameter *bt* (find-package :bordeaux-threads))
+;;; ============================================================================
+;;; Utilidades para conversión de listas de caracteres a strings
+;;; ============================================================================
 
-(defun %with-lock (lock thunk)
-  (funcall (find-symbol "ACQUIRE-LOCK" *bt*) lock)
-  (unwind-protect
-      (funcall thunk)
-    (funcall (find-symbol "RELEASE-LOCK" *bt*) lock)))
-
-(defun %make-lock (&optional (name "imgx-batch-lock"))
-  (funcall (find-symbol "MAKE-LOCK" *bt*) name))
-
-(defun %make-thread (fn &optional (name "imgx-worker"))
-  (funcall (find-symbol "MAKE-THREAD" *bt*) fn :name name))
-
-(defun %join-thread (th)
-  (funcall (find-symbol "JOIN-THREAD" *bt*) th))
-
-;;;; Helpers
-
-(defparameter +imgx-keys+
-  '(:input-format :INPUT-FORMAT
-    :grayscale :GRAYSCALE
-    :resize :RESIZE
-    :crop :CROP
-    :rotate :ROTATE
-    :flip :FLIP
-    :blur :BLUR
-    :sharpen :SHARPEN
-    :brightness :BRIGHTNESS
-    :contrast :CONTRAST
-    :watermark-image :WATERMARK-IMAGE
-    :watermark-image-b64 :WATERMARK-IMAGE-B64
-    :output-format :OUTPUT-FORMAT :output--format :OUTPUT--FORMAT
-    :quality :QUALITY
-    :as-data-uri :AS-DATA-URI :as--data--uri :AS--DATA--URI
-    :save-to-disk :SAVE-TO-DISK :save--to--disk :SAVE--TO--DISK
-    :output-dir :OUTPUT-DIR :output--dir :OUTPUT--DIR
-    :filename-prefix :FILENAME-PREFIX)
-  "Claves aceptadas por IMGX:PROCESAR-IMAGEN-B64.")
-
-(defun %filter-plist (plist allowed-keys)
-  (loop for (k v) on plist by #'cddr
-        when (member k allowed-keys)
-        append (list k v)))
-
-(defun %plist-merge (&rest plists)
-  "Merge simple de plists. Claves posteriores sobrescriben a las anteriores."
-  (let ((out '()))
-    (dolist (pl plists)
-      (loop for (k v) on pl by #'cddr do
-            (setf (getf out k) v)))
-    out))
-
-(defun %extra-opts-from-task (task)
-  "Devuelve los pares clave/valor del task que NO son :id, :input-b64, :b64 ni :ops."
-  (loop for (k v) on task by #'cddr
-        unless (member k '(:id :input-b64 :b64 :ops))
-        append (list k v)))
-
-(defun normalize-plist-keys (plist)
-  "Normaliza todas las claves de un plist eliminando guiones duplicados"
-  (loop for (k v) on plist by #'cddr
-        for normalized = (if (keywordp k)
-                            (intern (with-output-to-string (out)
-                                      (loop with last-dash = nil
-                                            for ch across (symbol-name k)
-                                            do (if (char= ch #\-)
-                                                   (unless last-dash
-                                                     (write-char ch out)
-                                                     (setf last-dash t))
-                                                   (progn
-                                                     (write-char ch out)
-                                                     (setf last-dash nil)))))
-                                    :keyword)
-                            k)
-        append (list normalized v)))
-
-(defun %normalize-task (task default-opts)
-  "Toma una tarea y devuelve tres valores"
-  ;; Normalizar claves de la tarea primero
-  (let* ((normalized-task (normalize-plist-keys task))
-         (id  (getf normalized-task :id))
-         (b64 (or (getf normalized-task :input-b64)
-                  (getf normalized-task :b64)
-                  (error "Tarea sin :input-b64 o :b64. Claves disponibles: ~{~S ~}"
-                         (loop for (k v) on normalized-task by #'cddr collect k))))
-         (ops (getf normalized-task :ops))
-         ;; Normalizar ops si existe
-         (normalized-ops (when ops (normalize-plist-keys ops)))
-         (final-opts (%filter-plist
-                      (%plist-merge default-opts normalized-ops)
-                      +imgx-keys+)))
+(defun convert-char-lists-to-strings (obj)
+  "Convierte recursivamente todas las listas/vectores de caracteres en strings.
+   CL-JSON a veces retorna strings como listas o vectores de caracteres."
+  (cond
+    ;; Vector de caracteres -> string
+    ((and (vectorp obj) (every #'characterp obj))
+     (coerce obj 'string))
     
-    (format t "~%DEBUG BATCH: ID=~S~%" id)
-    (format t "DEBUG BATCH: B64 encontrado (primeros 50): ~S~%" 
-            (subseq b64 0 (min 50 (length b64))))
-    (format t "DEBUG BATCH: Final opts: ~S~%" final-opts)
-    (values id b64 final-opts)))
+    ;; Lista de caracteres -> string
+    ((and (listp obj) (not (null obj)) (every #'characterp obj))
+     (coerce obj 'string))
+    
+    ;; Cons cell (par key . value)
+    ((and (consp obj) (not (listp (cdr obj))))
+     (cons (convert-char-lists-to-strings (car obj))
+           (convert-char-lists-to-strings (cdr obj))))
+    
+    ;; Lista -> procesar cada elemento
+    ((listp obj)
+     (mapcar #'convert-char-lists-to-strings obj))
+    
+    ;; Vector -> procesar cada elemento
+    ((vectorp obj)
+     (map 'vector #'convert-char-lists-to-strings obj))
+    
+    ;; Otro tipo -> devolver tal cual
+    (t obj)))
 
-(defun %process-one (task default-opts)
-  "Procesa una sola tarea. Devuelve plist de resultado."
-  (let ((start (get-internal-real-time)))
-    (handler-case
-        (multiple-value-bind (id b64 opts) (%normalize-task task default-opts)
-          (let* ((result (apply #'imgx:procesar-imagen-b64 b64 opts))
-                 (ms  (truncate (* 1000
-                                   (/ (- (get-internal-real-time) start)
-                                      internal-time-units-per-second)))))
-            ;; result puede ser b64 o un plist con :output-b64 y :file-path
-            (cond
-              ((and (listp result) (getf result :file-path))
-               (list :id id 
-                     :status :ok 
-                     :output (getf result :output-b64)
-                     :file-path (namestring (getf result :file-path))
-                     :ms ms))
-              (t
-               (list :id id :status :ok :output result :ms ms)))))
-      (error (e)
-        (list :id (getf task :id) :status :error :message (princ-to-string e))))))
+;;; ============================================================================
+;;; Funciones de parsing y respuesta JSON-RPC
+;;; ============================================================================
 
-(defun %default-nthreads (nitems)
-  (min nitems 4))
+(defun parse-json-request ()
+  "Parse JSON request y convierte listas de caracteres a strings"
+  (let ((content (raw-post-data :force-text t)))
+    (when (and content (> (length content) 0))
+      (let ((parsed (cl-json:decode-json-from-string content)))
+        (convert-char-lists-to-strings parsed)))))
 
-;;;; API principal
+(defun create-json-response (result &key id)
+  (setf (content-type*) "application/json; charset=utf-8")
+  (cl-json:encode-json-to-string
+   `(("jsonrpc" . "2.0")
+     ("result" . ,result)
+     ("id" . ,(or id 1)))))
 
-(defun procesar-peticion (tareas
-                          &key
-                            (default-opts '())
-                            (max-threads nil)
-                            on-progress
-                            (cancel-predicate (constantly nil)))
-  "Procesa una lista de tareas en paralelo.
-Cada tarea es un plist con al menos :input-b64 (o :b64).
-Las opciones de edición pueden ir a nivel de tarea o bajo :ops.
-Devuelve una lista de resultados en el mismo orden.
+(defun create-error-response (code message &key id data)
+  (setf (content-type*) "application/json; charset=utf-8")
+  (cl-json:encode-json-to-string
+   `(("jsonrpc" . "2.0")
+     ("error" . ,(append `(("code" . ,code) ("message" . ,message))
+                         (when data `(("data" . ,data)))))
+     ("id" . ,(or id 1)))))
 
-Ejemplos de tarea:
-  '(:id 1 :input-b64 \"data:image/jpeg;base64,...\"
-    :resize (800 600) :grayscale t :output-format :png :as-data-uri t
-    :save-to-disk t :output-dir \"node/images/\")
+(defun safe-backtrace ()
+  (ignore-errors
+    (with-output-to-string (s)
+      (let ((pkg (find-package :sb-debug)))
+        (when pkg
+          (let ((fn (find-symbol "BACKTRACE" pkg)))
+            (when fn (funcall fn 50 s))))))))
 
-  '(:id 2 :b64 \"...base64...\"
-    :ops (:crop (100 100 400 300) :rotate 90 :quality 85 :output-format :jpg
-          :save-to-disk t))"
-  (let* ((vec (coerce tareas 'vector))
-         (n   (length vec))
-         (nthreads (or max-threads (%default-nthreads n)))
-         (lock (%make-lock "imgx-batch-dispatch-lock"))
-         (next 0)
-         (results (make-array n :initial-element nil)))
-    (labels ((take-index ()
-           (%with-lock lock
-             (lambda ()
-               (if (or (funcall cancel-predicate)
-                       (>= next n))
-                   nil
-                   (prog1 next (incf next)))))))
-      (let ((threads
-              (loop for i below nthreads
-                    collect
-                    (%make-thread
-                     (lambda ()
-                       (loop for idx = (take-index) while idx do
-                         (let* ((task (aref vec idx))
-                                (res  (%process-one task default-opts)))
-                           (setf (aref results idx)
-                                 (append (list :index idx) res))
-                            (when on-progress
-                                (funcall on-progress :index idx :n n)))))
-                     (format nil "imgx-worker-~a" i)))))
-        (dolist (th threads) (%join-thread th))
-        (loop for i from 0 below n collect (aref results i))))))
+;;; ============================================================================
+;;; Utilidades para trabajar con alists y plists
+;;; ============================================================================
+
+(defun alist-p (x)
+  (and (listp x) (every #'consp x)))
+
+(defun jassoc (key obj)
+  (when (listp obj)
+    (or (assoc key obj)
+        (and (keywordp key)
+             (or (assoc (symbol-name key) obj :test #'equal)
+                 (assoc (string-downcase (symbol-name key)) obj :test #'equal)))
+        (and (stringp key)
+             (let ((k (ignore-errors (intern (string-upcase key) :keyword))))
+               (and k (assoc k obj)))))))
+
+(defun jget (obj key)
+  (let ((cell (jassoc key obj)))
+    (when cell (cdr cell))))
+
+(defun normalize-keyword-name (str)
+  "Normaliza un string de keyword: sustituye _ por -, elimina guiones duplicados"
+  (let ((step1 (substitute #\- #\_ str)))
+    (with-output-to-string (out)
+      (loop with last-dash = nil
+            for ch across step1
+            do (if (char= ch #\-)
+                   (unless last-dash
+                     (write-char ch out)
+                     (setf last-dash t))
+                   (progn
+                     (write-char ch out)
+                     (setf last-dash nil)))))))
+
+(defun string-to-keyword (str)
+  "Convierte string a keyword normalizando guiones"
+  (intern (string-upcase (normalize-keyword-name str)) :keyword))
+
+(defun deep-json->lisp (x)
+  "Convierte JSON (alists) a plists de Lisp, normalizando claves Y CONVIRTIENDO LISTAS DE CHARS"
+  (cond
+    ;; Vector de caracteres -> string
+    ((and (vectorp x) (> (length x) 0) (every #'characterp x))
+     (coerce x 'string))
+    
+    ;; Lista de caracteres -> string (ANTES de otros checks de lista)
+    ((and (listp x) (not (null x)) (every #'characterp x))
+     (coerce x 'string))
+    
+    ;; Vector -> lista procesada
+    ((vectorp x)
+     (map 'list #'deep-json->lisp x))
+    
+    ;; Alist -> plist (procesando valores recursivamente)
+    ((and (listp x) (not (null x)) (every #'consp x))
+     (loop for (k . v) in x
+           for key = (cond
+                       ((stringp k) (string-to-keyword k))
+                       ((symbolp k) (intern (string-upcase (symbol-name k)) :keyword))
+                       (t k))
+           ;; IMPORTANTE: Aplicar deep-json->lisp al valor para convertir char-lists
+           for val = (deep-json->lisp v)
+           append (list key val)))
+    
+    ;; Lista normal (no alist, no chars)
+    ((listp x)
+     (mapcar #'deep-json->lisp x))
+    
+    ;; Valor simple
+    (t x)))
+;;; ============================================================================
+;;; Handler JSON-RPC principal
+;;; ============================================================================
+
+(define-easy-handler (json-rpc-handler :uri "/api/rpc" :default-request-type :post) ()
+  (handler-case
+      (let* ((request (parse-json-request))
+             (method (or (jget request :method) (jget request "method")))
+             (params (or (jget request :params) (jget request "params")))
+             (id (or (jget request :id) (jget request "id"))))
+        
+        (cond
+          ;;; Método: imgxProcesarLote
+          ((string= (or method "") "imgxProcesarLote")
+           (let* ((tasks-raw (cond
+                               ((vectorp params) params)
+                               ((alist-p params)
+                                (or (jget params :tareas) (jget params "tareas")
+                                    (jget params :tasks)  (jget params "tasks")
+                                    params))
+                               ((listp params) params)
+                               (t nil)))
+                  (tareas (mapcar #'deep-json->lisp
+                                  (cond
+                                    ((vectorp tasks-raw) (coerce tasks-raw 'list))
+                                    ((listp tasks-raw) tasks-raw)
+                                    ((alist-p tasks-raw) (list tasks-raw))
+                                    (t '()))))
+                  (default-opts (and (alist-p params)
+                                     (deep-json->lisp
+                                      (or (jget params :default-opts)
+                                          (jget params "default-opts")
+                                          (jget params :defaultOpts)
+                                          (jget params "defaultOpts")))))
+                  (max-threads (and (alist-p params)
+                                    (or (jget params :max-threads)
+                                        (jget params "max-threads")
+                                        (jget params :maxThreads)
+                                        (jget params "maxThreads")))))
+             
+             ;; Asegurar save-to-disk por defecto
+             (unless (getf default-opts :save-to-disk)
+               (setf default-opts (append default-opts '(:save-to-disk t))))
+             
+             (if (null tareas)
+                 (create-error-response -32602 
+                                       "Parámetros inválidos: se esperaban 'tareas' como lista/array" 
+                                       :id id)
+                 (create-json-response
+                  (mi-api:procesar-lote-imgx job-manager tareas
+                                             :default-opts (or default-opts '())
+                                             :max-threads max-threads)
+                  :id id))))
+          
+          ;;; Método: obtenerProgreso
+          ((string= (or method "") "obtenerProgreso")
+           (create-json-response (mi-api:obtener-progreso job-manager) :id id))
+          
+          ;;; Método: cancelarProcesamiento
+          ((string= (or method "") "cancelarProcesamiento")
+           (create-json-response (mi-api:cancelar-procesamiento job-manager) :id id))
+          
+          ;;; Método: obtenerEstadisticas
+          ((string= (or method "") "obtenerEstadisticas")
+           (create-json-response (mi-api:obtener-estadisticas job-manager) :id id))
+          
+          ;;; Método no encontrado
+          (t
+           (create-error-response -32601 "Método no encontrado" :id id))))
+    
+    ;; Manejo de errores
+    (error (e)
+      (let* ((rid (ignore-errors
+                    (let ((req (parse-json-request)))
+                      (or (jget req :id) (jget req "id")))))
+             (bt (safe-backtrace)))
+        (create-error-response -32603
+                               (format nil "Error interno del servidor: ~A" e)
+                               :id rid
+                               :data bt)))))
