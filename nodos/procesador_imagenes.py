@@ -5,13 +5,19 @@ from PIL import Image
 import io
 import base64
 import time
+import os
 from typing import List, Dict, Any
 
 @Pyro4.expose
 class ProcesadorImagenes:
-    def __init__(self, max_workers: int = 5):
+    def __init__(self, max_workers: int = 5, carpeta_salida: str = "images"):
         self.gestor_hilos = GestorHilos(max_workers)
         self.transformaciones = TransformacionesImagen()
+        self.carpeta_salida = carpeta_salida
+        
+        # Crear carpeta de salida si no existe
+        if not os.path.exists(self.carpeta_salida):
+            os.makedirs(self.carpeta_salida)
         
     def procesar_imagenes(self, lista_imagenes: List[Dict]) -> Dict[str, Any]:
         """
@@ -38,7 +44,8 @@ class ProcesadorImagenes:
             'total_procesadas': len(resultados),
             'resultados': resultados,
             'timestamp': time.time(),
-            'estado': 'completado'
+            'estado': 'completado',
+            'carpeta_salida': self.carpeta_salida
         }
     
     def _procesar_imagen_individual(self, img_data: Dict) -> Dict[str, Any]:
@@ -86,9 +93,6 @@ class ProcesadorImagenes:
                     # Continuar con las siguientes transformaciones
                     continue
             
-            # Convertir a base64 para retornar
-            buffer = io.BytesIO()
-            
             # Determinar formato de salida
             formato_salida = 'PNG'  # Por defecto
             for transformacion in reversed(transformaciones):
@@ -99,8 +103,13 @@ class ProcesadorImagenes:
             if formato_salida.upper() == 'JPG':
                 formato_salida = 'JPEG'
             
+            # Convertir a base64 para retornar
+            buffer = io.BytesIO()
             imagen.save(buffer, format=formato_salida)
             imagen_procesada_b64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
+            
+            # Guardar imagen en archivo
+            nombre_archivo = self._guardar_imagen(imagen, nombre, formato_salida)
             
             return {
                 'estado': 'completado',
@@ -108,7 +117,9 @@ class ProcesadorImagenes:
                 'imagen_procesada': imagen_procesada_b64,
                 'formato_salida': formato_salida,
                 'dimensiones_finales': imagen.size,
-                'tamaño_bytes': len(imagen_procesada_b64)
+                'tamaño_bytes': len(imagen_procesada_b64),
+                'archivo_guardado': nombre_archivo,
+                'ruta_completa': os.path.join(self.carpeta_salida, nombre_archivo)
             }
             
         except Exception as e:
@@ -116,6 +127,27 @@ class ProcesadorImagenes:
                 'estado': 'error',
                 'error': f"Error procesando imagen {nombre}: {str(e)}"
             }
+    
+    def _guardar_imagen(self, imagen: Image.Image, nombre_original: str, formato: str) -> str:
+        """Guarda la imagen procesada en la carpeta de salida"""
+        # Crear nombre de archivo único con timestamp
+        nombre_base = os.path.splitext(nombre_original)[0]
+        timestamp = int(time.time())
+        
+        # Determinar extensión
+        if formato.upper() == 'JPEG':
+            extension = 'jpg'
+        else:
+            extension = formato.lower()
+        
+        nombre_archivo = f"{nombre_base}_{timestamp}.{extension}"
+        ruta_completa = os.path.join(self.carpeta_salida, nombre_archivo)
+        
+        # Guardar imagen
+        imagen.save(ruta_completa, format=formato)
+        print(f"✓ Imagen guardada: {ruta_completa}")
+        
+        return nombre_archivo
     
     def _aplicar_transformacion(self, imagen: Image.Image, tipo: str, parametros: Dict) -> Image.Image:
         """Aplica una transformación específica usando la clase Transformaciones"""
@@ -142,12 +174,58 @@ class ProcesadorImagenes:
         """Retorna el estado actual del servidor"""
         estado_hilos = self.gestor_hilos.obtener_estado()
         
+        # Verificar si la carpeta de salida existe y contar archivos
+        cantidad_archivos = 0
+        if os.path.exists(self.carpeta_salida):
+            cantidad_archivos = len([f for f in os.listdir(self.carpeta_salida) 
+                                   if os.path.isfile(os.path.join(self.carpeta_salida, f))])
+        
         return {
             'estado': 'activo',
             'hilos': estado_hilos,
+            'carpeta_salida': self.carpeta_salida,
+            'archivos_procesados': cantidad_archivos,
             'transformaciones_disponibles': self.transformaciones.obtener_transformaciones_disponibles(),
             'timestamp': time.time()
         }
+    
+    def listar_archivos_procesados(self) -> List[Dict[str, Any]]:
+        """Lista todos los archivos procesados en la carpeta de salida"""
+        archivos = []
+        if os.path.exists(self.carpeta_salida):
+            for archivo in os.listdir(self.carpeta_salida):
+                ruta_completa = os.path.join(self.carpeta_salida, archivo)
+                if os.path.isfile(ruta_completa):
+                    stat = os.stat(ruta_completa)
+                    archivos.append({
+                        'nombre': archivo,
+                        'ruta': ruta_completa,
+                        'tamaño_bytes': stat.st_size,
+                        'fecha_modificacion': time.ctime(stat.st_mtime)
+                    })
+        
+        return archivos
+    
+    def obtener_imagen_como_base64(self, nombre_archivo: str) -> Dict[str, Any]:
+        """Obtiene una imagen procesada específica como base64"""
+        try:
+            ruta_archivo = os.path.join(self.carpeta_salida, nombre_archivo)
+            if not os.path.exists(ruta_archivo):
+                return {'error': f'Archivo no encontrado: {nombre_archivo}'}
+            
+            with open(ruta_archivo, 'rb') as f:
+                imagen_bytes = f.read()
+                imagen_b64 = base64.b64encode(imagen_bytes).decode('utf-8')
+            
+            return {
+                'nombre_archivo': nombre_archivo,
+                'imagen_base64': imagen_b64,
+                'tamaño_bytes': len(imagen_b64),
+                'ruta': ruta_archivo
+            }
+            
+        except Exception as e:
+            return {'error': f'Error leyendo archivo: {str(e)}'}
     
     def saludar(self) -> str:
         """Método simple para probar la conexión"""

@@ -3,8 +3,9 @@ from spyne.protocol.soap import Soap11
 from spyne.server.wsgi import WsgiApplication
 from spyne.model.complex import Iterable
 from spyne.model.primitive import String
-from app.services.db_service import procesar_imagenes
-import json
+from app.services.db_service import procesar_imagenes, registrar_imagenes_en_db, registrar_usuario, login_usuario
+from app import db
+import hashlib
 
 # ===== MODELOS SOAP =====
 
@@ -34,20 +35,44 @@ class ImagenCambiosType(ComplexModel):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
+class ResultadoTransformacionType(ComplexModel):
+    __namespace__ = "server.soap.service"
+    transformacion = Unicode
+    numero = Integer
+    estado = Unicode
+    error = Unicode(optional=True)
+
 class ResultadoImagenType(ComplexModel):
     __namespace__ = "server.soap.service"
-    nombre = Unicode
+    nombre_original = Unicode
     estado = Unicode
-    imagen_procesada = Unicode
+    imagen_procesada_base64 = Unicode
     formato_salida = Unicode
     dimensiones_finales = Unicode
+    archivo_guardado = Unicode
+    transformaciones_aplicadas = Array(ResultadoTransformacionType)
 
 class ProcesamientoResultType(ComplexModel):
     __namespace__ = "server.soap.service"
     success = Unicode
     total_procesadas = Integer
     mensaje = Unicode
+    user_id = Integer
     resultados = Array(ResultadoImagenType)
+
+class LoginResultType(ComplexModel):
+    __namespace__ = "server.soap.service"
+    success = Unicode
+    user_id = Integer
+    mensaje = Unicode
+    username = Unicode
+
+class RegisterResultType(ComplexModel):
+    __namespace__ = "server.soap.service"
+    success = Unicode
+    user_id = Integer
+    mensaje = Unicode
+    username = Unicode
 
 class ImageProcessingService(ServiceBase):
     __namespace__ = "server.soap.service"
@@ -56,7 +81,7 @@ class ImageProcessingService(ServiceBase):
     def procesar_imagen_cambios(ctx, request):
         """
         Recibe el XML SOAP con imágenes y transformaciones,
-        las envía al servidor Pyro4 para procesamiento
+        registra en BD, envía al servidor Pyro4 y devuelve resultados
         """
         try:
             print("SOAP Request recibido:")
@@ -86,48 +111,142 @@ class ImageProcessingService(ServiceBase):
                 
                 data_dict['imagenes'].append(imagen_data)
             
-            # Procesar a través del servicio de base de datos (que ahora usa Pyro4)
-            result = procesar_imagenes(data_dict)
+            # 1. PRIMERO: Registrar en base de datos
+            print("📝 Registrando en base de datos...")
+            registro_db = registrar_imagenes_en_db(data_dict)
             
-            # Construir respuesta SOAP estructurada
+            if not registro_db.get('success'):
+                raise Exception(f"Error registrando en BD: {registro_db.get('message')}")
+            
+            print(f"✅ Registro en BD exitoso. IDs: {registro_db.get('ids_imagenes', [])}")
+            
+            # 2. SEGUNDO: Procesar imágenes con Pyro4
+            print("🔄 Enviando imágenes a servidor Pyro4...")
+            result_pyro = procesar_imagenes(data_dict)
+            
+            # 3. Construir respuesta SOAP estructurada
             response = ProcesamientoResultType()
-            response.success = "true" if result.get('success') else "false"
-            response.mensaje = result.get('mensaje', '')
+            response.success = "true" if result_pyro.get('success') else "false"
+            response.mensaje = result_pyro.get('mensaje', '')
+            response.user_id = request.user_id
             
-            if result.get('success') and 'resultado' in result:
-                pyro_result = result['resultado']
+            if result_pyro.get('success') and 'resultado' in result_pyro:
+                pyro_result = result_pyro['resultado']
                 response.total_procesadas = pyro_result.get('total_procesadas', 0)
                 response.resultados = []
                 
                 if 'resultados' in pyro_result:
                     for nombre, img_result in pyro_result['resultados'].items():
                         resultado_img = ResultadoImagenType()
-                        resultado_img.nombre = nombre
+                        resultado_img.nombre_original = nombre
                         resultado_img.estado = img_result.get('estado', 'desconocido')
                         resultado_img.formato_salida = img_result.get('formato_salida', '')
                         resultado_img.dimensiones_finales = str(img_result.get('dimensiones_finales', ''))
+                        resultado_img.archivo_guardado = img_result.get('archivo_guardado', '')
                         
-                        # Incluir imagen procesada (puede ser muy grande, considerar opcional)
+                        # Incluir imagen procesada en base64 (completa)
                         if 'imagen_procesada' in img_result:
-                            resultado_img.imagen_procesada = img_result['imagen_procesada'][:100] + "..." if len(img_result['imagen_procesada']) > 100 else img_result['imagen_procesada']
+                            resultado_img.imagen_procesada_base64 = img_result['imagen_procesada']
                         else:
-                            resultado_img.imagen_procesada = ""
+                            resultado_img.imagen_procesada_base64 = ""
+                        
+                        # Transformaciones aplicadas
+                        resultado_img.transformaciones_aplicadas = []
+                        if 'transformaciones_aplicadas' in img_result:
+                            for trans in img_result['transformaciones_aplicadas']:
+                                trans_result = ResultadoTransformacionType()
+                                trans_result.transformacion = trans.get('transformacion', '')
+                                trans_result.numero = trans.get('numero', 0)
+                                trans_result.estado = trans.get('estado', '')
+                                if 'error' in trans:
+                                    trans_result.error = trans['error']
+                                resultado_img.transformaciones_aplicadas.append(trans_result)
                         
                         response.resultados.append(resultado_img)
             
+            print(f"✅ Procesamiento completado. Imágenes: {response.total_procesadas}")
             return response
                 
         except Exception as e:
             import traceback
             error_details = traceback.format_exc()
-            print(f"Error en SOAP service: {error_details}")
+            print(f"❌ Error en SOAP service: {error_details}")
             
             # Devolver respuesta de error
             response = ProcesamientoResultType()
             response.success = "false"
             response.mensaje = f"Error en el servicio: {str(e)}"
             response.total_procesadas = 0
+            response.user_id = request.user_id if 'request' in locals() else 0
             response.resultados = []
+            
+            return response
+    
+    @rpc(Unicode, Unicode, _returns=LoginResultType)
+    def login(ctx, username, password):
+        """
+        Inicio de sesión de usuario
+        """
+        try:
+            print(f"🔐 Intento de login: {username}")
+            
+            resultado = login_usuario(username, password)
+            
+            response = LoginResultType()
+            response.success = "true" if resultado.get('success') else "false"
+            response.mensaje = resultado.get('message', '')
+            response.user_id = resultado.get('user_id', 0)
+            response.username = username
+            
+            if resultado.get('success'):
+                print(f"✅ Login exitoso para usuario: {username} (ID: {resultado.get('user_id')})")
+            else:
+                print(f"❌ Login fallido para usuario: {username}")
+            
+            return response
+            
+        except Exception as e:
+            print(f"❌ Error en login: {e}")
+            
+            response = LoginResultType()
+            response.success = "false"
+            response.mensaje = f"Error en el servicio: {str(e)}"
+            response.user_id = 0
+            response.username = username
+            
+            return response
+    
+    @rpc(Unicode, Unicode, _returns=RegisterResultType)
+    def registrar_usuario(ctx, username, password):
+        """
+        Registro de nuevo usuario
+        """
+        try:
+            print(f"👤 Registro de usuario: {username}")
+            
+            resultado = registrar_usuario(username, password)
+            
+            response = RegisterResultType()
+            response.success = "true" if resultado.get('success') else "false"
+            response.mensaje = resultado.get('message', '')
+            response.user_id = resultado.get('user_id', 0)
+            response.username = username
+            
+            if resultado.get('success'):
+                print(f"✅ Registro exitoso para usuario: {username} (ID: {resultado.get('user_id')})")
+            else:
+                print(f"❌ Registro fallido para usuario: {username}")
+            
+            return response
+            
+        except Exception as e:
+            print(f"❌ Error en registro: {e}")
+            
+            response = RegisterResultType()
+            response.success = "false"
+            response.mensaje = f"Error en el servicio: {str(e)}"
+            response.user_id = 0
+            response.username = username
             
             return response
     
