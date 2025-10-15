@@ -1,54 +1,61 @@
 import requests
-from soap_utils import generate_login_soap, generate_register_soap, generate_soap_request
+import base64
+from soap_utils import generate_soap_request, generate_login_soap
 
-def test_registro():
-    """Probar registro de usuario"""
-    soap_xml = generate_register_soap("usuario_prueba", "password123")
+def imagen_a_base64_simple():
+    """
+    Crea una imagen simple de prueba en base64
+    """
+    from PIL import Image, ImageDraw
+    import io
     
-    print("📝 Probando registro de usuario...")
-    response = send_soap_request(soap_xml, "registrar_usuario")
-    print("Respuesta:", response.text)
+    # Crear una imagen simple de 100x100 píxeles
+    img = Image.new('RGB', (100, 100), color='red')
+    draw = ImageDraw.Draw(img)
+    draw.text((10, 10), "TEST IMAGE", fill='white')
+    
+    # Convertir a base64
+    buffer = io.BytesIO()
+    img.save(buffer, format='PNG')
+    return base64.b64encode(buffer.getvalue()).decode('utf-8')
 
-def test_login():
-    """Probar inicio de sesión"""
-    soap_xml = generate_login_soap("usuario_prueba", "password123")
+def test_procesamiento_con_imagen_real():
+    """Probar procesamiento con imagen real en base64"""
     
-    print("🔐 Probando login...")
-    response = send_soap_request(soap_xml, "login")
-    print("Respuesta:", response.text)
-    
-    # Extraer user_id de la respuesta para usar en otras pruebas
-    return response.text
-
-def test_procesamiento_con_auth():
-    """Probar procesamiento después de autenticación"""
-    # Primero hacer login para obtener user_id
+    # Primero hacer login
     soap_login = generate_login_soap("usuario_prueba", "password123")
     response_login = send_soap_request(soap_login, "login")
+    print("✅ Login exitoso")
     
-    # Aquí necesitarías parsear la respuesta para obtener el user_id
-    # Por ahora usamos un ID fijo para la prueba
-    user_id = 1
+    # Crear imagen real en base64
+    imagen_base64_real = imagen_a_base64_simple()
+    print(f"📷 Imagen base64 creada ({len(imagen_base64_real)} caracteres)")
     
     imagenes_ejemplo = [
         {
-            'nombre': 'imagen_test.jpg',
-            'tipo': 'jpg',
-            'contenido_base64': 'VGVzdEJhc2U2NERhdGE=',
+            'nombre': 'imagen_real_test.png',
+            'tipo': 'png',
+            'contenido_base64': imagen_base64_real,
             'cambios': [
                 {
                     'nombre': 'escala_grises',
                     'especificaciones': ''
+                },
+                {
+                    'nombre': 'redimensionar',
+                    'especificaciones': 'ancho=200,alto=200'
                 }
             ]
         }
     ]
     
-    soap_xml = generate_soap_request(user_id, imagenes_ejemplo)
+    soap_xml = generate_soap_request(1, imagenes_ejemplo)
     
-    print("🖼️ Probando procesamiento con autenticación...")
+    print("🖼️ Enviando imagen real para procesamiento...")
     response = send_soap_request(soap_xml, "procesar_imagen_cambios")
-    print("Respuesta:", response.text)
+    
+    print("📋 Respuesta SOAP:")
+    print(response.text)
 
 def send_soap_request(soap_xml, action):
     """Envía una petición SOAP"""
@@ -61,12 +68,5 @@ def send_soap_request(soap_xml, action):
     return requests.post(url, data=soap_xml, headers=headers)
 
 if __name__ == "__main__":
-    print("🧪 Probando sistema de autenticación SOAP...\n")
-    
-    test_registro()
-    print("\n" + "="*50 + "\n")
-    
-    test_login()
-    print("\n" + "="*50 + "\n")
-    
-    test_procesamiento_con_auth()
+    print("🧪 Probando con imagen real...\n")
+    test_procesamiento_con_imagen_real()
