@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const { SERVER } = require('../config/constants');
 
-const API_BASE = `http://localhost:${SERVER.PORT}/api`;
+const API_BASE = `http://10.152.190.66:${SERVER.PORT}/api`;
 const IMAGES_DIR = path.join(__dirname, '..', 'images');
 
 class APIClient {

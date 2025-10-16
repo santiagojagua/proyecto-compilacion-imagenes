@@ -5,9 +5,9 @@ class Config:
     """Configuración del servidor Pyro"""
     
     # Configuración de red
-    HOST = 'localhost'
+    HOST = '0.0.0.0'
     PORT = 9090
-    MAX_HILOS = 8
+    MAX_HILOS = 3
     MAX_MEMORY_USAGE = 0.8
     
     # Timeouts

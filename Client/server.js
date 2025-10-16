@@ -36,8 +36,8 @@ app.use("*", (req, res) => {
 });
 
 // Iniciar servidor
-app.listen(SERVER.PORT, () => {
-    console.log(`🚀 Servidor REST ejecutándose en http://localhost:${SERVER.PORT}`);
+app.listen(SERVER.PORT, '0.0.0.0', () => {
+    console.log(`🚀 Servidor REST ejecutándose en http://0.0.0.0:${SERVER.PORT}`);
     console.log(`📋 Endpoints disponibles:`);
     console.log(`   AUTH:`);
     console.log(`     POST /api/auth/register     - Registro de usuario`);

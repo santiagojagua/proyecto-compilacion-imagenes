@@ -1,7 +1,7 @@
 module.exports = {
     SERVER: {
         PORT: 3000,
-        SOAP_URL: "http://127.0.0.1:5000/client/soap"
+        SOAP_URL: "http://10.152.190.67:5000/client/soap"
     },
     MESSAGES: {
         AUTH: {
