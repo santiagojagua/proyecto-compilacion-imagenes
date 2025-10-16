@@ -1,17 +1,5 @@
 INTERFACE ParallelImageProcessor
 
-  // Procesamiento individual de imágenes
-  MÉTODO convertirEscalaGrises(entrada: cadena, salida: cadena) -> booleano
-  MÉTODO redimensionar(entrada: cadena, salida: cadena, ancho: entero, alto: entero) -> booleano
-  MÉTODO recortar(entrada: cadena, salida: cadena, x: entero, y: entero, ancho: entero, alto: entero) -> booleano
-  MÉTODO rotar(entrada: cadena, salida: cadena, angulo: real) -> booleano
-  MÉTODO reflejar(entrada: cadena, salida: cadena, horizontal: booleano) -> booleano
-  MÉTODO desenfocar(entrada: cadena, salida: cadena, radio: real) -> booleano
-  MÉTODO perfilar(entrada: cadena, salida: cadena, intensidad: real) -> booleano
-  MÉTODO ajustarBrilloContraste(entrada: cadena, salida: cadena, brillo: real, contraste: real) -> booleano
-  MÉTODO insertarMarcaAgua(entrada: cadena, salida: cadena, texto: cadena, opciones: Mapa) -> booleano
-  MÉTODO convertirFormato(entrada: cadena, salida: cadena, formato: cadena) -> booleano
-
   // Procesamiento por lotes
   MÉTODO procesarLoteParalelo(operaciones: Lista<Operacion>) -> Lista<Resultado>
 
