@@ -1,15 +1,20 @@
 from PIL import Image, ImageFilter, ImageEnhance, ImageDraw, ImageFont
-from typing import Dict
+from typing import Dict, List
 import io
+import Pyro4
 
+@Pyro4.expose
 class TransformacionesImagen:
+    """Servicio de transformaciones de imágenes usando PIL"""
     
     @staticmethod
+    @Pyro4.expose
     def aplicar_escala_grises(imagen: Image.Image, parametros: Dict = {}) -> Image.Image:
         """Convierte la imagen a escala de grises"""
         return imagen.convert('L')
     
     @staticmethod
+    @Pyro4.expose
     def aplicar_redimensionar(imagen: Image.Image, parametros: Dict) -> Image.Image:
         """Redimensiona la imagen"""
         ancho = parametros.get('ancho')
@@ -20,6 +25,7 @@ class TransformacionesImagen:
             raise ValueError("Faltan parámetros ancho/alto para redimensionar")
     
     @staticmethod
+    @Pyro4.expose
     def aplicar_recortar(imagen: Image.Image, parametros: Dict) -> Image.Image:
         """Recorta la imagen"""
         izquierda = parametros.get('izquierda', 0)
@@ -29,6 +35,7 @@ class TransformacionesImagen:
         return imagen.crop((izquierda, superior, derecha, inferior))
     
     @staticmethod
+    @Pyro4.expose
     def aplicar_rotar(imagen: Image.Image, parametros: Dict) -> Image.Image:
         """Rota la imagen"""
         angulo = parametros.get('angulo', 0)
@@ -36,6 +43,7 @@ class TransformacionesImagen:
         return imagen.rotate(angulo, expand=expandir)
     
     @staticmethod
+    @Pyro4.expose
     def aplicar_reflejar(imagen: Image.Image, parametros: Dict) -> Image.Image:
         """Refleja la imagen horizontal o verticalmente"""
         tipo_reflejo = parametros.get('tipo', 'horizontal')
@@ -47,17 +55,20 @@ class TransformacionesImagen:
             raise ValueError("Tipo de reflejo no válido. Use 'horizontal' o 'vertical'")
     
     @staticmethod
+    @Pyro4.expose
     def aplicar_desenfocar(imagen: Image.Image, parametros: Dict) -> Image.Image:
         """Aplica desenfoque gaussiano"""
         radio = parametros.get('radio', 2)
         return imagen.filter(ImageFilter.GaussianBlur(radio))
     
     @staticmethod
+    @Pyro4.expose
     def aplicar_perfilar(imagen: Image.Image, parametros: Dict = {}) -> Image.Image:
         """Aplica filtro de nitidez"""
         return imagen.filter(ImageFilter.SHARPEN)
     
     @staticmethod
+    @Pyro4.expose
     def aplicar_ajustar_brillo_contraste(imagen: Image.Image, parametros: Dict) -> Image.Image:
         """Ajusta brillo y contraste"""
         brillo = parametros.get('brillo', 1.0)
@@ -74,6 +85,7 @@ class TransformacionesImagen:
         return imagen
     
     @staticmethod
+    @Pyro4.expose
     def aplicar_marca_agua(imagen: Image.Image, parametros: Dict) -> Image.Image:
         """Añade marca de agua o texto"""
         texto = parametros.get('texto', 'Marca de Agua')
@@ -128,6 +140,7 @@ class TransformacionesImagen:
         return Image.alpha_composite(imagen, txt_layer)
     
     @staticmethod
+    @Pyro4.expose
     def aplicar_convertir_formato(imagen: Image.Image, parametros: Dict) -> Image.Image:
         """Convierte el formato de la imagen"""
         formato = parametros.get('formato', 'PNG').upper()
@@ -141,6 +154,7 @@ class TransformacionesImagen:
         return imagen
     
     @staticmethod
+    @Pyro4.expose
     def obtener_transformaciones_disponibles() -> Dict[str, str]:
         """Retorna la lista de transformaciones disponibles"""
         return {
@@ -155,3 +169,49 @@ class TransformacionesImagen:
             'marca_agua': 'Añadir marca de agua o texto',
             'convertir_formato': 'Convertir formato de imagen'
         }
+    
+    @staticmethod
+    @Pyro4.expose
+    def procesar_imagen_pil(imagen_bytes: bytes, transformaciones: List[Dict]) -> bytes:
+        """
+        Procesa una imagen usando PIL con múltiples transformaciones
+        """
+        try:
+            # Convertir bytes a imagen PIL
+            imagen = Image.open(io.BytesIO(imagen_bytes))
+            
+            # Aplicar transformaciones
+            for transformacion in transformaciones:
+                tipo = transformacion.get('tipo')
+                parametros = transformacion.get('parametros', {})
+                
+                if tipo == 'escala_grises':
+                    imagen = TransformacionesImagen.aplicar_escala_grises(imagen, parametros)
+                elif tipo == 'redimensionar':
+                    imagen = TransformacionesImagen.aplicar_redimensionar(imagen, parametros)
+                elif tipo == 'recortar':
+                    imagen = TransformacionesImagen.aplicar_recortar(imagen, parametros)
+                elif tipo == 'rotar':
+                    imagen = TransformacionesImagen.aplicar_rotar(imagen, parametros)
+                elif tipo == 'reflejar':
+                    imagen = TransformacionesImagen.aplicar_reflejar(imagen, parametros)
+                elif tipo == 'desenfocar':
+                    imagen = TransformacionesImagen.aplicar_desenfocar(imagen, parametros)
+                elif tipo == 'perfilar':
+                    imagen = TransformacionesImagen.aplicar_perfilar(imagen, parametros)
+                elif tipo == 'ajustar_brillo_contraste':
+                    imagen = TransformacionesImagen.aplicar_ajustar_brillo_contraste(imagen, parametros)
+                elif tipo == 'marca_agua':
+                    imagen = TransformacionesImagen.aplicar_marca_agua(imagen, parametros)
+                elif tipo == 'convertir_formato':
+                    imagen = TransformacionesImagen.aplicar_convertir_formato(imagen, parametros)
+            
+            # Convertir de vuelta a bytes
+            output_buffer = io.BytesIO()
+            formato = parametros.get('formato', 'JPEG')
+            imagen.save(output_buffer, format=formato, quality=95)
+            
+            return output_buffer.getvalue()
+            
+        except Exception as e:
+            raise Exception(f"Error en procesamiento PIL: {str(e)}")

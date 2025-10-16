@@ -6,7 +6,7 @@ class User(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(50), unique=True, nullable=False)
-    password = db.Column(db.String(200), nullable=False)  #Encriptada
+    password = db.Column(db.String(200), nullable=False)  # Encriptada
 
 class Imagen(db.Model):
     __tablename__ = "imagen"
@@ -45,4 +45,3 @@ class ImagenCambio(db.Model):
     imagen = db.relationship("Imagen", backref=db.backref("cambios", lazy=True))
 
     fecha_crea = db.Column(db.DateTime, default=datetime.now, nullable=False)
-

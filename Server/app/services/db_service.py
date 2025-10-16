@@ -1,9 +1,14 @@
-from app import db
+from flask import current_app
 from app.models.entitys import User, Imagen, Cambio, UsuariosImagen, ImagenCambio
 from app.models.viewModel import ImagenCambiosViewModel
 from .node_service import procesar_imagenes_pyro
 from datetime import datetime
 import hashlib
+
+def get_db():
+    """Obtiene la instancia de la base de datos desde el contexto de la app"""
+    from app import db
+    return db
 
 def hash_password(password):
     """Encripta la contraseña usando SHA-256"""
@@ -13,6 +18,7 @@ def registrar_usuario(username, password):
     """
     Registra un nuevo usuario en la base de datos
     """
+    db = get_db()
     try:
         # Verificar si el usuario ya existe
         usuario_existente = User.query.filter_by(username=username).first()
@@ -48,6 +54,7 @@ def login_usuario(username, password):
     """
     Autentica un usuario
     """
+    db = get_db()
     try:
         # Buscar usuario
         usuario = User.query.filter_by(username=username).first()
@@ -81,6 +88,7 @@ def registrar_imagenes_en_db(data: dict):
     """
     Registra las imágenes y cambios en la base de datos antes del procesamiento
     """
+    db = get_db()
     try:
         vm = ImagenCambiosViewModel(data)
         user_id = vm.user_id
@@ -147,13 +155,28 @@ def registrar_imagenes_en_db(data: dict):
             'message': f'Error registrando en BD: {str(e)}'
         }
 
-def procesar_imagenes(data: dict):
+def procesar_imagenes(data: dict, user_id: int = None, user_name: str = None):
     """
     Procesa las imágenes después de registrarlas en la BD
     """
     try:
         # Convertir a ViewModel para validación
         vm = ImagenCambiosViewModel(data)
+        
+        # Usar user_id proporcionado o del data
+        target_user_id = user_id if user_id is not None else vm.user_id
+        target_user_name = user_name if user_name is not None else f"usuario_{target_user_id}"
+        
+        print(f"🔍 Datos recibidos para procesamiento:")
+        print(f"   User ID: {target_user_id}")
+        print(f"   User Name: {target_user_name}")
+        print(f"   Número de imágenes: {len(vm.imagenes)}")
+        
+        for i, img in enumerate(vm.imagenes):
+            print(f"   Imagen {i+1}: {img.nombre}")
+            print(f"   Tipo: {img.tipo}")
+            print(f"   Tamaño base64: {len(img.contenido_base64)} chars")
+            print(f"   Transformaciones: {[c.nombre for c in img.cambios]}")
         
         # Preparar datos para Pyro4
         lista_imagenes = []
@@ -171,12 +194,19 @@ def procesar_imagenes(data: dict):
             }
             lista_imagenes.append(imagen_data)
         
-        # Enviar al servidor Pyro4
-        resultado = procesar_imagenes_pyro(lista_imagenes)
+        print(f"🔄 Enviando {len(lista_imagenes)} imágenes a Pyro4...")
+        
+        # Enviar al servidor Pyro4 con información de usuario
+        resultado = procesar_imagenes_pyro(lista_imagenes, target_user_id, target_user_name)
+        
+        print(f"📡 Resultado de Pyro4: {resultado.get('success', False)}")
         
         return resultado
     
     except Exception as e:
+        import traceback
+        print(f"❌ ERROR en procesar_imagenes: {e}")
+        print(traceback.format_exc())
         return {
             'success': False, 
             'message': f'Error en procesamiento: {str(e)}'
@@ -186,6 +216,7 @@ def obtener_historial_usuario(user_id: int):
     """
     Obtiene el historial de procesamiento de un usuario
     """
+    db = get_db()
     try:
         historial = db.session.query(
             UsuariosImagen.fecha_crea,
