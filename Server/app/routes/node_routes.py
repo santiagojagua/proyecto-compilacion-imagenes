@@ -15,6 +15,11 @@ def test_node_connection():
     resultado = probar_conexion_pyro()
     return jsonify(resultado)
 
+# NUEVO: estados de todos los nodos
+@node_bp.route("/status/all", methods=["GET"])
+def get_all_nodes_status():
+    return jsonify(obtener_estado_servidor())
+
 # Mantener la ruta original para compatibilidad
 @node_bp.route("/<int:node_id>", methods=["GET"])
 def get_node(node_id):
