@@ -5,9 +5,11 @@ import time
 import psutil
 from typing import List, Dict, Any
 import Pyro4
+from pathlib import Path
 
 from .procesador_base import ProcesadorBase
 from .procesador_transformaciones import TransformacionesCV2
+from ..core.config import Config
 
 @Pyro4.expose
 class ProcesadorBase64(ProcesadorBase, TransformacionesCV2):
@@ -78,26 +80,31 @@ class ProcesadorBase64(ProcesadorBase, TransformacionesCV2):
 
     @Pyro4.expose
     def procesar_imagen_base64_individual(self, imagen_base64: str, nombre: str, transformaciones: List[Dict]) -> Dict:
-        """Procesa una imagen individual en base64"""
         try:
-            # Verificar memoria antes de procesar
+            # Verificar memoria
             if self.check_memory_usage() > self.max_memory_usage * 100:
                 self.logger.warning("Alto uso de memoria, esperando...")
                 time.sleep(2)
-            
-            # Decodificar base64
+
+            # Decodificar
             img = self._decodificar_base64(imagen_base64)
             if img is None:
-                return {'status': 'error', 'message': 'No se pudo decodificar la imagen base64'}
-            
+                return {'status': 'error', 'message': 'No se pudo decodificar la imagen base64', 'nombre': nombre}
+
             self.logger.info(f"Procesando base64: {nombre} - {img.shape[1]}x{img.shape[0]}")
-            
-            # Aplicar transformaciones
+
+            # Transformar
             img_procesada, transformaciones_aplicadas = self._aplicar_transformaciones(img, transformaciones)
-            
-            # Codificar resultado a base64
-            imagen_procesada_base64 = self._codificar_a_base64(img_procesada)
-            
+
+            # Formato de salida
+            ext_out = self._resolver_formato_salida(transformaciones)
+
+            # Codificar a base64 con ese formato
+            imagen_procesada_base64 = self._codificar_a_base64(img_procesada, ext_out)
+
+            # Guardar a disco
+            abs_path, rel_path = self._guardar_imagen(img_procesada, nombre, ext_out)
+
             return {
                 'status': 'success',
                 'nombre': nombre,
@@ -106,9 +113,11 @@ class ProcesadorBase64(ProcesadorBase, TransformacionesCV2):
                 'dimensiones_procesadas': f"{img_procesada.shape[1]}x{img_procesada.shape[0]}",
                 'transformaciones_aplicadas': transformaciones_aplicadas,
                 'tamaño_original_bytes': len(imagen_base64),
-                'tamaño_procesado_bytes': len(imagen_procesada_base64)
+                'tamaño_procesado_bytes': len(imagen_procesada_base64),
+                'processed': rel_path,          # <- relativo: images/archivo.ext
+                'processed_abs': abs_path       # <- absoluto (por si lo necesitas)
             }
-            
+
         except Exception as e:
             self.logger.error(f"Error procesando {nombre}: {e}")
             return {'status': 'error', 'message': str(e), 'nombre': nombre}
@@ -193,6 +202,77 @@ class ProcesadorBase64(ProcesadorBase, TransformacionesCV2):
         """Retorna el timestamp actual"""
         from datetime import datetime
         return datetime.now().isoformat()
+
+    def _resolver_formato_salida(self, transformaciones: List[Dict]) -> str:
+        """
+        Determina el formato de salida a partir de las transformaciones.
+        Soporta: jpg/jpeg, png, webp, bmp. Por defecto 'jpg'.
+        """
+        ext = 'jpg'
+        for t in transformaciones or []:
+            tipo = (t.get('tipo') or t.get('nombre') or '').lower()
+            if tipo == 'convertir_formato':
+                fmt = (t.get('parametros', {}) or {}).get('formato') or ''
+                f = str(fmt).lower()
+                if f in ('jpeg', 'jpg'): ext = 'jpg'
+                elif f in ('png',): ext = 'png'
+                elif f in ('webp',): ext = 'webp'
+                elif f in ('bmp',): ext = 'bmp'
+        return ext
+
+    def _codificar_a_base64(self, imagen, ext: str = 'jpg') -> str:
+        """Codifica con el contenedor adecuado según ext."""
+        try:
+            ext = ext.lower()
+            dot = '.' + ('jpg' if ext == 'jpeg' else ext)
+            params = []
+            if dot in ('.jpg', '.jpeg'):
+                params = [cv2.IMWRITE_JPEG_QUALITY, 95]
+            elif dot == '.png':
+                params = [cv2.IMWRITE_PNG_COMPRESSION, 3]
+            elif dot == '.webp':
+                params = [cv2.IMWRITE_WEBP_QUALITY, 95]
+
+            ok, buffer = cv2.imencode(dot, imagen, params)
+            if not ok:
+                raise RuntimeError(f"No se pudo codificar imagen como {dot}")
+            return base64.b64encode(buffer).decode('utf-8')
+        except Exception as e:
+            self.logger.error(f"Error codificando a base64: {e}")
+            return ""
+
+    def _guardar_imagen(self, imagen, nombre_original: str, ext: str = 'jpg'):
+        """Guarda la imagen en Config.IMAGES_DIR y retorna (abs_path, rel_path)."""
+        try:
+            if not Config.SAVE_IMAGES:
+                return "", ""
+            out_dir = Path(Config.IMAGES_DIR)
+            out_dir.mkdir(parents=True, exist_ok=True)
+
+            base = Path(nombre_original).stem or 'imagen'
+            safe = "".join(c if c.isalnum() or c in ('-', '_') else '_' for c in base)[:80]
+            ts = int(time.time() * 1000)
+            ext = ext.lower()
+            if ext == 'jpeg': ext = 'jpg'
+            filename = f"{safe}_{ts}.{ext}"
+            path = out_dir / filename
+
+            if ext in ('jpg', 'jpeg'):
+                cv2.imwrite(str(path), imagen, [cv2.IMWRITE_JPEG_QUALITY, 95])
+            elif ext == 'png':
+                cv2.imwrite(str(path), imagen, [cv2.IMWRITE_PNG_COMPRESSION, 3])
+            elif ext == 'webp':
+                cv2.imwrite(str(path), imagen, [cv2.IMWRITE_WEBP_QUALITY, 95])
+            elif ext == 'bmp':
+                cv2.imwrite(str(path), imagen)
+            else:
+                cv2.imwrite(str(path), imagen, [cv2.IMWRITE_JPEG_QUALITY, 95])
+
+            rel = f"images/{filename}"
+            return str(path), rel
+        except Exception as e:
+            self.logger.warning(f"No se pudo guardar imagen {nombre_original}: {e}")
+            return "", ""
 
     @Pyro4.expose
     def check_memory_usage(self):

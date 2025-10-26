@@ -1,3 +1,4 @@
+from pathlib import Path
 import socket
 import logging
 
@@ -17,6 +18,10 @@ class Config:
     # Configuración de procesamiento
     BATCH_SIZE = 10
     TARGET_SIZE = (1024, 1024)
+
+    PROJECT_ROOT = Path(__file__).resolve().parents[2]  # /.../Nodes
+    IMAGES_DIR = PROJECT_ROOT / "images"
+    SAVE_IMAGES = True
     
     @classmethod
     def get_available_port(cls, start_port=9090):
